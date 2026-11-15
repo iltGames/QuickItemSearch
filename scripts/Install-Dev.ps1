@@ -21,7 +21,7 @@ if (Test-Path -LiteralPath $target) {
     New-Item -ItemType Directory -Path $target | Out-Null
 }
 
-foreach ($file in @('ItemIndex.lua', 'Search.lua')) {
+foreach ($file in @('ItemIndex.lua', 'Search.lua', 'Sources.lua')) {
     Copy-Item -LiteralPath (Join-Path $source $file) -Destination $target -Force
 }
 

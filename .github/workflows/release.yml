@@ -43,7 +43,7 @@ jobs:
             exit 0
           fi
           mkdir QuickItemSearch
-          cp QuickItemSearch.toc Bindings.xml ItemIndex.lua Search.lua UI.lua README.md LICENSE QuickItemSearch/
+          cp QuickItemSearch.toc Bindings.xml ItemIndex.lua Search.lua Sources.lua UI.lua README.md LICENSE QuickItemSearch/
           archive="QuickItemSearch-$version.zip"
           zip -r "$archive" QuickItemSearch
           unzip -t "$archive"

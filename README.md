@@ -4,11 +4,19 @@ Press Ctrl+Shift+Space to open search when the chord is free. To change it, find
 
 Search by English item name, numeric ID, or pasted item link. Use Up and Down to browse results, Enter to open the native item tooltip, and Escape to close the search overlay. You can also hover for a tooltip, click to inspect, Shift-click to insert a link into open chat, or Ctrl-click to try on supported equipment.
 
+Drag the grip at the top of the overlay to move it. Quick Item Search remembers the position across reloads.
+
 The bundled index contains 24,565 names from the English ItemSparse table installed with WoW Forever 1.60.1.70938 and that build's locally received item hotfixes. The game supplies tooltips, item links, and icons. The index can include internal or unobtainable items. Future or server-only items missing from the snapshot can still be queried by ID or link when the game exposes them.
 
 ## Installation
 
 Install through CurseForge once the project is available, or extract the ZIP from [GitHub Releases](https://github.com/iltGames/QuickItemSearch/releases) into `_forever_/Interface/AddOns`. The ZIP installs into the `QuickItemSearch` folder.
+
+### Sources and drop rates
+
+Quick Item Search uses [AtlasLoot Classic Forever](https://www.curseforge.com/wow/addons/atlasloot-forever) for dungeon and raid loot and [QuestieDB](https://www.curseforge.com/wow/addons/questiedb) for NPCs, containers, vendors, and quest rewards. When Questie also provides a rate for a drop, Quick Item Search can use it where AtlasLoot has no rate.
+
+The bundled index works on its own. Quick Item Search saves source details as you inspect results and uses that local backup when a provider has no matching entry or is unavailable. On a fresh install, sources appear as they are loaded from an installed provider. Rates only appear when a provider supplies one.
 
 ## Development
 

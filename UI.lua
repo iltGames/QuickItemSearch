@@ -1,4 +1,5 @@
-local _, addon = ...
+local addonName, addon = ...
+local settingsKey = addonName .. "Settings"
 local PAGE_SIZE = 8
 local ROW_HEIGHT = 30
 local WIDTH = 560
@@ -21,6 +22,7 @@ local selected = 1
 local debounce
 local pending
 local hoveredRow
+local moving
 
 local function ReadItem(id)
     local name, link, quality, _, _, _, _, _, _, icon = C_Item.GetItemInfo(id)
@@ -88,6 +90,7 @@ local function ShowHover(row)
         GameTooltip:AddLine((label:gsub("|", "||")))
         GameTooltip:AddLine("Click to request item details.", 0.8, 0.8, 0.8, true)
     end
+    addon.AppendItemSources(GameTooltip, entry.id)
     GameTooltip:Show()
 end
 
@@ -131,6 +134,14 @@ local function OpenItem(link, action)
         local itemString = link:match("|H([^|]+)|h")
         if itemString then
             SetItemRef(itemString, link, "LeftButton")
+            if ItemRefTooltip and ItemRefTooltip:IsShown() then
+                local _, shownLink = ItemRefTooltip:GetItem()
+                local itemID = tonumber(itemString:match("^item:(%d+)"))
+                if shownLink and tonumber(shownLink:match("|Hitem:(%d+)")) == itemID then
+                    addon.AppendItemSources(ItemRefTooltip, itemID)
+                    ItemRefTooltip:Show()
+                end
+            end
         end
     end
 end
@@ -203,11 +214,31 @@ local function MoveSelection(delta)
     RenderPage()
 end
 
+local function StopMovingWindow()
+    if not moving then return end
+    moving = false
+    frame:StopMovingOrSizing()
+    local x, top = frame:GetCenter(), frame:GetTop()
+    local parentX, parentTop = UIParent:GetCenter(), UIParent:GetTop()
+    if not (x and top and parentX and parentTop) then return end
+
+    local settings = _G[settingsKey]
+    settings.x, settings.y = x - parentX, top - parentTop
+    frame:ClearAllPoints()
+    frame:SetPoint("TOP", UIParent, "TOP", settings.x, settings.y)
+end
+
 local function CreateWindow()
+    local settings = _G[settingsKey]
+    if type(settings) ~= "table" then
+        settings = {}
+        _G[settingsKey] = settings
+    end
     frame = CreateFrame("Frame", "QuickItemSearchFrame", UIParent, "BackdropTemplate")
     frame:SetSize(WIDTH, 101)
-    frame:SetPoint("TOP", UIParent, "TOP", 0, -130)
+    frame:SetPoint("TOP", UIParent, "TOP", tonumber(settings.x) or 0, tonumber(settings.y) or -130)
     frame:SetFrameStrata("DIALOG")
+    frame:SetMovable(true)
     frame:SetClampedToScreen(true)
     frame:EnableMouse(true)
     frame:EnableMouseWheel(true)
@@ -235,7 +266,7 @@ local function CreateWindow()
 
     searchBox = CreateFrame("EditBox", nil, frame, "SearchBoxTemplate")
     searchBox:SetSize(WIDTH - 48, 34)
-    searchBox:SetPoint("TOPLEFT", 24, -10)
+    searchBox:SetPoint("TOPLEFT", 24, -13)
     searchBox:SetFontObject("GameFontHighlightLarge")
     searchBox:SetTextColor(unpack(COLORS.text))
     searchBox:SetAltArrowKeyMode(false)
@@ -325,10 +356,30 @@ local function CreateWindow()
     keyboardHint:SetPoint("BOTTOMRIGHT", -14, 12)
     keyboardHint:SetText("Up / Down   Navigate     Enter   Inspect     Esc   Close")
     keyboardHint:SetTextColor(unpack(COLORS.mutedText))
+    local dragHandle = CreateFrame("Frame", nil, frame)
+    dragHandle:SetPoint("TOPLEFT", 8, -1)
+    dragHandle:SetPoint("TOPRIGHT", -8, -1)
+    dragHandle:SetHeight(12)
+    dragHandle:EnableMouse(true)
+    dragHandle:RegisterForDrag("LeftButton")
+    dragHandle:SetScript("OnDragStart", function()
+        HideHover()
+        frame:StartMoving()
+        frame:SetUserPlaced(false)
+        moving = true
+    end)
+    dragHandle:SetScript("OnDragStop", StopMovingWindow)
+
+    local grip = dragHandle:CreateTexture(nil, "ARTWORK")
+    grip:SetSize(28, 2)
+    grip:SetPoint("CENTER")
+    grip:SetColorTexture(unpack(COLORS.accent))
+
     frame:RegisterEvent("ITEM_DATA_LOAD_RESULT")
     frame:RegisterEvent("GET_ITEM_INFO_RECEIVED")
     frame:SetScript("OnEvent", OnItemData)
     frame:SetScript("OnHide", function()
+        StopMovingWindow()
         searchBox:ClearFocus()
         HideHover()
         ClearPending()
