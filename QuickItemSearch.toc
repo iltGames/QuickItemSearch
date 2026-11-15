@@ -1,0 +1,10 @@
+## Interface: 16001
+## Title: Quick Item Search
+## Notes: Search WoW Forever items and view their in-game tooltips.
+## Version: 0.1.2
+## IconTexture: Interface\Icons\INV_Misc_Spyglass_03
+## AddonCompartmentFunc: QuickItemSearch_Toggle
+
+ItemIndex.lua
+Search.lua
+UI.lua

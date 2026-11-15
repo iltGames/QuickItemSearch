@@ -1,0 +1,5 @@
+<Bindings>
+    <Binding name="QUICKITEMSEARCH_TOGGLE" category="Quick Item Search">
+        QuickItemSearch_Toggle()
+    </Binding>
+</Bindings>

@@ -1,0 +1,50 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - QuickItemSearch.toc
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: quick-item-search-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Package and publish the TOC version
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version="$(sed -n 's/^## Version: \([0-9][0-9.]*\)$/\1/p' QuickItemSearch.toc)"
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Expected a version in major.minor.patch format in QuickItemSearch.toc" >&2
+            exit 1
+          fi
+          tag="v$version"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "Release $tag already exists."
+            exit 0
+          fi
+          mkdir QuickItemSearch
+          cp QuickItemSearch.toc Bindings.xml ItemIndex.lua Search.lua UI.lua README.md LICENSE QuickItemSearch/
+          archive="QuickItemSearch-$version.zip"
+          zip -r "$archive" QuickItemSearch
+          unzip -t "$archive"
+          gh release create "$tag" "$archive" --target "$GITHUB_SHA" --title "Quick Item Search $tag" --generate-notes

@@ -1,2 +1,28 @@
-# ForeverItemSearch
-Spotlight-style item search for World of Warcraft: Forever.
+# Quick Item Search
+
+Press Ctrl+Shift+Space to open search when the chord is free. To change it, find **Open Item Search** under **Quick Item Search** in WoW's Keybindings menu. You can also use `/itemsearch` or run a direct search such as `/itemsearch linen cloth`.
+
+Search by English item name, numeric ID, or pasted item link. Use Up and Down to browse results, Enter to open the native item tooltip, and Escape to close the search overlay. You can also hover for a tooltip, click to inspect, Shift-click to insert a link into open chat, or Ctrl-click to try on supported equipment.
+
+The bundled index contains 24,565 names from the English ItemSparse table installed with WoW Forever 1.60.1.70938 and that build's locally received item hotfixes. The game supplies tooltips, item links, and icons. The index can include internal or unobtainable items. Future or server-only items missing from the snapshot can still be queried by ID or link when the game exposes them.
+
+## Installation
+
+Install through CurseForge once the project is available, or extract the ZIP from [GitHub Releases](https://github.com/iltGames/QuickItemSearch/releases) into `_forever_/Interface/AddOns`. The ZIP installs into the `QuickItemSearch` folder.
+
+## Development
+
+Edit the repository files and install the development copy with PowerShell:
+
+```powershell
+./scripts/Install-Dev.ps1 -AddOnsPath 'C:/Blizzard Games/World of Warcraft/_forever_/Interface/AddOns'
+```
+
+This installs **Quick Item Search (Dev)** in `AddOns/QuickItemSearchDev` with its own keybinding and `/itemsearchdev` command. Enable either the dev or stable addon for the character you test with. Restart WoW to detect the dev addon the first time, then use `/reload` for subsequent edits.
+
+## Releases
+
+Bump the version in `QuickItemSearch.toc` and push to `main`. GitHub Actions packages the addon and publishes the matching version tag and ZIP. CurseForge's source packager uses the same repository and tagged versions. The package metadata keeps the stable folder named `QuickItemSearch`.
+
+The MIT license covers the addon code. Item names and IDs are game data from Blizzard Entertainment.
+

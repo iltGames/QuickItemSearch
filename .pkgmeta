@@ -1,0 +1,5 @@
+package-as: QuickItemSearch
+
+ignore:
+  - .github
+  - scripts
