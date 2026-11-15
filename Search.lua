@@ -17,8 +17,14 @@ function addon.Search(input)
     if id then
         return { { id = id, name = addon.index[id] } }
     end
+    local bossQuery = query:lower():match("^boss:%s*(.*)$")
+    if bossQuery then
+        if #bossQuery < 2 then return {}, "Enter at least two characters of the boss name." end
+        local loot, hint = addon.SearchBossLoot(bossQuery)
+        return loot or {}, hint
+    end
     if #query < 2 then
-        return {}, "Enter at least two characters, an item ID, or an item link."
+        return {}, "Enter an item or boss name, item ID, or item link."
     end
     if query:match("^%d+$") or query:match("^item:") or query:find("|H", 1, true) then
         return {}, "Enter a valid item ID or item link."
@@ -55,6 +61,10 @@ function addon.Search(input)
         for _, entry in ipairs(group) do
             results[#results + 1] = entry
         end
+    end
+    if addon.SearchBossLoot then
+        local loot, hint = addon.SearchBossLoot(query, #results > 0)
+        if loot then return loot, hint end
     end
     return results
 end

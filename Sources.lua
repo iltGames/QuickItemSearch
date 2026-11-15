@@ -1,7 +1,7 @@
 local addonName, addon = ...
 local ATLAS_DUNGEONS = "AtlasLootClassic_DungeonsAndRaids"
 local storageName = addonName .. "SourceDB"
-local atlasDB, atlasItems
+local atlasDB, atlasItems, atlasBosses
 
 local function Clean(text)
     if type(text) ~= "string" or (issecretvalue and issecretvalue(text)) then return nil end
@@ -23,9 +23,9 @@ local function AtlasIndex()
         db = itemDB:Get(ATLAS_DUNGEONS)
     end
     if type(db) ~= "table" then return end
-    if atlasDB == db then return atlasItems end
+    if atlasDB == db then return atlasItems, atlasBosses end
 
-    local items = {}
+    local items, bosses = {}, {}
     local dropRates = atlas.Data and atlas.Data.Droprate
     for key, instance in pairs(db) do
         if type(instance) == "table" and type(instance.items) == "table" then
@@ -34,6 +34,7 @@ local function AtlasIndex()
                     local named, zone, name = pcall(itemDB.GetNameData_UNSAFE, itemDB, ATLAS_DUNGEONS, key, bossIndex)
                     zone, name = Clean(zone), Clean(name)
                     if named and name and name ~= "" and zone and zone ~= "" then
+                        local lootIDs = {}
                         local npcID = boss.npcID
                         if type(npcID) == "table" then npcID = #npcID == 1 and npcID[1] or nil end
                         if type(npcID) ~= "number" then npcID = nil end
@@ -44,6 +45,7 @@ local function AtlasIndex()
                                     for _, slot in ipairs(loot) do
                                         local itemID = type(slot) == "table" and slot[2]
                                         if type(itemID) == "number" and itemID > 0 then
+                                            lootIDs[itemID] = true
                                             local rate = npcID and dropRates and dropRates.GetData and Rate(dropRates:GetData(npcID, itemID))
                                             local rows = items[itemID] or {}
                                             items[itemID] = rows
@@ -53,13 +55,50 @@ local function AtlasIndex()
                                 end
                             end
                         end
+                        if next(lootIDs) then
+                            bosses[#bosses + 1] = { name = name, key = name:lower(), loot = lootIDs }
+                        end
                     end
                 end
             end
         end
     end
-    atlasDB, atlasItems = db, items
-    return items
+    atlasDB, atlasItems, atlasBosses = db, items, bosses
+    return items, bosses
+end
+
+function addon.SearchBossLoot(query, exactOnly)
+    local ok, _, bosses = pcall(AtlasIndex)
+    if not ok or not bosses or #bosses == 0 then return nil, "AtlasLoot boss data is unavailable." end
+
+    local exact, partial = {}, {}
+    for _, boss in ipairs(bosses) do
+        if boss.key == query then
+            exact[#exact + 1] = boss
+        elseif not exactOnly and boss.key:find(query, 1, true) then
+            partial[#partial + 1] = boss
+        end
+    end
+    local matches = #exact > 0 and exact or partial
+    if #matches == 0 then return nil, "No matching bosses." end
+
+    local results, seen = {}, {}
+    for _, boss in ipairs(matches) do
+        for id in pairs(boss.loot) do
+            if not seen[id] then
+                seen[id] = true
+                local name = addon.index[id]
+                results[#results + 1] = { id = id, name = name, key = name and name:lower() or "~" }
+            end
+        end
+    end
+    table.sort(results, function(left, right)
+        if left.key == right.key then return left.id < right.id end
+        return left.key < right.key
+    end)
+
+    if #matches == 1 then return results, "Drops from " .. matches[1].name end
+    return results, ("Drops from %d matching bosses"):format(#matches)
 end
 
 local QUESTIE_FIELDS = {

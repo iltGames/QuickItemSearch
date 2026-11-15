@@ -1,8 +1,12 @@
 # Quick Item Search
 
-Press Ctrl+Shift+Space to open search when the chord is free. To change it, find **Open Item Search** under **Quick Item Search** in WoW's Keybindings menu. You can also use `/itemsearch` or run a direct search such as `/itemsearch linen cloth`.
+Press Ctrl+Shift+Space to open search when the chord is free. To change it, open **Options > AddOns > Quick Item Search**, click the hotkey, and press the new shortcut. The addon saves it in WoW's active keybinding set.
+
+Use `/qis` to open search or `/qis linen cloth` to open it with a query. `/itemsearch` is also available.
 
 Search by English item name, numeric ID, or pasted item link. Use Up and Down to browse results, Enter to open the native item tooltip, and Escape to close the search overlay. You can also hover for a tooltip, click to inspect, Shift-click to insert a link into open chat, or Ctrl-click to try on supported equipment.
+
+With AtlasLoot Classic Forever enabled, search for a boss by name to see its loot. Use `boss:<name>` to search only for bosses, including when a partial name also matches items.
 
 Drag the grip at the top of the overlay to move it. Quick Item Search remembers the position across reloads.
 
@@ -26,7 +30,7 @@ Edit the repository files and install the development copy with PowerShell:
 ./scripts/Install-Dev.ps1 -AddOnsPath 'C:/Blizzard Games/World of Warcraft/_forever_/Interface/AddOns'
 ```
 
-This installs **Quick Item Search (Dev)** in `AddOns/QuickItemSearchDev` with its own keybinding and `/itemsearchdev` command. Enable either the dev or stable addon for the character you test with. Restart WoW to detect the dev addon the first time, then use `/reload` for subsequent edits.
+This installs **Quick Item Search (Dev)** in `AddOns/QuickItemSearchDev` with its own keybinding and `/qisdev` command. Enable either the dev or stable addon for the character you test with. Restart WoW to detect the dev addon the first time, then use `/reload` for subsequent edits.
 
 ## Releases
 

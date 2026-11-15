@@ -18,10 +18,13 @@ local COLORS = {
 }
 local frame, searchBox, message, range
 local rows, results = {}, {}
+local searchHint
 local selected = 1
 local debounce
 local pending
 local hoveredRow
+local hoverAwaitingData
+local hoverRefresh
 local moving
 
 local function ReadItem(id)
@@ -95,10 +98,32 @@ local function ShowHover(row)
 end
 
 local function HideHover()
-    if hoveredRow and GameTooltip:IsOwned(hoveredRow) then
+    local row = hoveredRow
+    hoveredRow, hoverAwaitingData = nil, false
+    if hoverRefresh then
+        hoverRefresh:Cancel()
+        hoverRefresh = nil
+    end
+    if row and GameTooltip:IsOwned(row) then
         GameTooltip:Hide()
     end
-    hoveredRow = nil
+end
+
+local function QueueHoverRefresh(row, id)
+    if hoveredRow ~= row or not hoverAwaitingData or not C_Item.IsItemDataCachedByID(id) then return end
+    -- Native tooltip hooks can deliver item events synchronously during SetItemByID.
+    -- Consume the pending refresh before deferring it so a rebuild cannot queue itself.
+    hoverAwaitingData = false
+    local entry = row.entry
+    local refresh
+    refresh = C_Timer.NewTimer(0, function()
+        if hoverRefresh ~= refresh then return end
+        hoverRefresh = nil
+        if frame:IsShown() and hoveredRow == row and row.entry == entry and GameTooltip:IsOwned(row) then
+            ShowHover(row)
+        end
+    end)
+    hoverRefresh = refresh
 end
 
 local function ClearPending()
@@ -118,12 +143,13 @@ local function SearchNow()
     local hint
     results, hint = addon.Search(searchBox:GetText())
     selected = 1
-    message:SetText(hint or (#results == 0 and "No items found." or ""))
+    searchHint = hint or (#results == 0 and "No items found." or "")
+    message:SetText(searchHint)
     RenderPage()
 end
 
 local function OpenItem(link, action)
-    message:SetText("")
+    message:SetText(searchHint)
     if action == "chat" then
         if not ChatEdit_InsertLink(link) then
             message:SetText("Open chat, then Shift-click the item to insert its link.")
@@ -181,7 +207,7 @@ local function OnItemData(_, event, id, success)
         if row.entry and row.entry.id == id then
             if success then
                 UpdateRow(row)
-                if hoveredRow == row then ShowHover(row) end
+                QueueHoverRefresh(row, id)
             end
             break
         end
@@ -209,7 +235,7 @@ local function MoveSelection(delta)
     if nextSelection == selected then return end
     HideHover()
     ClearPending()
-    message:SetText("")
+    message:SetText(searchHint)
     selected = nextSelection
     RenderPage()
 end
@@ -272,7 +298,7 @@ local function CreateWindow()
     searchBox:SetAltArrowKeyMode(false)
     searchBox:SetAutoFocus(false)
     searchBox:SetMaxBytes(512)
-    searchBox.Instructions:SetText("English item name, ID, or link")
+    searchBox.Instructions:SetText("Item or boss name, item ID, or link")
     searchBox.Instructions:SetTextColor(unpack(COLORS.mutedText))
     for _, key in ipairs({ "Left", "Middle", "Right" }) do
         local piece = searchBox[key]
@@ -330,7 +356,10 @@ local function CreateWindow()
         row.idLabel:SetPoint("RIGHT", -10, 0)
         row.idLabel:SetTextColor(unpack(COLORS.mutedText))
         row:SetScript("OnEnter", function(self)
+            if not self.entry then return end
+            HideHover()
             hoveredRow = self
+            hoverAwaitingData = not C_Item.IsItemDataCachedByID(self.entry.id)
             ShowHover(self)
         end)
         row:SetScript("OnLeave", function(self)
@@ -408,7 +437,8 @@ function QuickItemSearch_Toggle()
     Toggle()
 end
 
-SLASH_QUICKITEMSEARCH1 = "/itemsearch"
+SLASH_QUICKITEMSEARCH1 = "/qis"
+SLASH_QUICKITEMSEARCH2 = "/itemsearch"
 SlashCmdList.QUICKITEMSEARCH = Toggle
 
 BINDING_NAME_QUICKITEMSEARCH_TOGGLE = "Open Item Search"
@@ -432,3 +462,112 @@ bindingOwner:RegisterEvent("PLAYER_LOGIN")
 bindingOwner:RegisterEvent("UPDATE_BINDINGS")
 bindingOwner:RegisterEvent("PLAYER_REGEN_ENABLED")
 bindingOwner:SetScript("OnEvent", UpdateBinding)
+
+local MODIFIERS = {
+    LALT = true, RALT = true, LCTRL = true, RCTRL = true,
+    LSHIFT = true, RSHIFT = true, LMETA = true, RMETA = true,
+}
+
+local function CreateBindingOptions()
+    if not Settings or not Settings.RegisterCanvasLayoutCategory then return end
+
+    local title = "Quick Item Search"
+    local panel = CreateFrame("Frame")
+    panel:Hide()
+
+    local heading = panel:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
+    heading:SetPoint("TOPLEFT", 16, -16)
+    heading:SetText(title)
+    local label = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+    label:SetPoint("TOPLEFT", heading, "BOTTOMLEFT", 0, -28)
+    label:SetText("Open Item Search")
+
+    local button = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+    button:SetPoint("LEFT", label, "RIGHT", 20, 0)
+    button:SetSize(180, 26)
+
+    local status = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    status:SetPoint("TOPLEFT", label, "BOTTOMLEFT", 0, -18)
+    local capturing, pendingKey, pendingBinding
+
+    local function Refresh()
+        if capturing then return end
+        local key = GetBindingKey(bindingCommand)
+        if not key and GetBindingAction(defaultKey, true) == bindingCommand then key = defaultKey end
+        button:SetText(key and GetBindingText(key, "KEY_") or "Not Bound")
+    end
+
+    local function Finish(message)
+        capturing, pendingKey, pendingBinding = false, nil, nil
+        button:EnableKeyboard(false)
+        status:SetText(message or "")
+        Refresh()
+    end
+
+    button:SetScript("OnClick", function()
+        if InCombatLockdown() then
+            Finish("You can change the hotkey after combat.")
+        elseif capturing then
+            Finish()
+        else
+            capturing = true
+            button:EnableKeyboard(true)
+            button:SetPropagateKeyboardInput(false)
+            button:SetText("Press a key...")
+            status:SetText("Press Esc to cancel.")
+        end
+    end)
+    button:SetScript("OnKeyDown", function(_, key)
+        if not capturing then return end
+        if key == "ESCAPE" then Finish() return end
+        if pendingKey or MODIFIERS[key] then return end
+
+        pendingKey = key
+        pendingBinding = (IsAltKeyDown() and "ALT-" or "")
+            .. (IsControlKeyDown() and "CTRL-" or "")
+            .. (IsShiftKeyDown() and "SHIFT-" or "") .. key
+    end)
+    button:SetScript("OnKeyUp", function(_, key)
+        if not capturing or key ~= pendingKey then return end
+        if InCombatLockdown() then Finish("You can change the hotkey after combat.") return end
+
+        local combo = pendingBinding
+        local action = GetBindingAction(combo, true)
+        if action and action ~= "" and action ~= bindingCommand then
+            Finish(GetBindingText(combo, "KEY_") .. " is already assigned.")
+            return
+        end
+
+        local previous = GetBindingKey(bindingCommand)
+        local wasBound = GetBindingAction(combo) == bindingCommand
+        if not wasBound and not SetBinding(combo, bindingCommand) then
+            Finish("Could not assign that hotkey.")
+            return
+        end
+        if previous and previous ~= combo and not SetBinding(previous) then
+            if not wasBound then SetBinding(combo) end
+            Finish("Could not replace the previous hotkey.")
+            return
+        end
+        SaveBindings(GetCurrentBindingSet())
+        UpdateBinding()
+        Finish("Hotkey saved.")
+    end)
+    button:EnableKeyboard(false)
+
+    panel:SetScript("OnShow", Refresh)
+    panel:SetScript("OnHide", function() Finish() end)
+    panel:RegisterEvent("UPDATE_BINDINGS")
+    panel:RegisterEvent("PLAYER_REGEN_DISABLED")
+    panel:SetScript("OnEvent", function(_, event)
+        if event == "PLAYER_REGEN_DISABLED" and capturing then
+            Finish("You can change the hotkey after combat.")
+        else
+            Refresh()
+        end
+    end)
+    local category = Settings.RegisterCanvasLayoutCategory(panel, title)
+    Settings.RegisterAddOnCategory(category)
+end
+
+CreateBindingOptions()

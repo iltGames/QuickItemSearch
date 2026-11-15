@@ -35,6 +35,7 @@ foreach ($file in $renamedFiles.Keys) {
     $contents.Replace('QuickItemSearch', 'QuickItemSearchDev').
         Replace('QUICKITEMSEARCH', 'QUICKITEMSEARCHDEV').
         Replace('Quick Item Search', 'Quick Item Search (Dev)').
+        Replace('/qis"', '/qisdev"').
         Replace('/itemsearch', '/itemsearchdev') |
         Set-Content -NoNewline -Encoding utf8 -LiteralPath (Join-Path $target $renamedFiles[$file])
 }
