@@ -1,7 +1,7 @@
 local addonName, addon = ...
 local ATLAS_DUNGEONS = "AtlasLootClassic_DungeonsAndRaids"
 local storageName = addonName .. "SourceDB"
-local atlasDB, atlasItems, atlasBosses
+local atlasDB, atlasItems, atlasBosses, atlasBossDrops
 
 local function Clean(text)
     if type(text) ~= "string" or (issecretvalue and issecretvalue(text)) then return nil end
@@ -23,9 +23,9 @@ local function AtlasIndex()
         db = itemDB:Get(ATLAS_DUNGEONS)
     end
     if type(db) ~= "table" then return end
-    if atlasDB == db then return atlasItems, atlasBosses end
+    if atlasDB == db then return atlasItems, atlasBosses, atlasBossDrops end
 
-    local items, bosses = {}, {}
+    local items, bosses, bossDrops = {}, {}, {}
     local dropRates = atlas.Data and atlas.Data.Droprate
     for key, instance in pairs(db) do
         if type(instance) == "table" and type(instance.items) == "table" then
@@ -46,6 +46,7 @@ local function AtlasIndex()
                                         local itemID = type(slot) == "table" and slot[2]
                                         if type(itemID) == "number" and itemID > 0 then
                                             lootIDs[itemID] = true
+                                            if not boss.ExtraList then bossDrops[itemID] = true end
                                             local rate = npcID and dropRates and dropRates.GetData and Rate(dropRates:GetData(npcID, itemID))
                                             local rows = items[itemID] or {}
                                             items[itemID] = rows
@@ -63,8 +64,13 @@ local function AtlasIndex()
             end
         end
     end
-    atlasDB, atlasItems, atlasBosses = db, items, bosses
-    return items, bosses
+    atlasDB, atlasItems, atlasBosses, atlasBossDrops = db, items, bosses, bossDrops
+    return items, bosses, bossDrops
+end
+
+function addon.GetBossDropItems()
+    local ok, _, _, bossDrops = pcall(AtlasIndex)
+    if ok and bossDrops then return bossDrops end
 end
 
 function addon.SearchBossLoot(query, exactOnly)

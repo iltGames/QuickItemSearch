@@ -11,25 +11,8 @@ local function ParseID(query)
     end
 end
 
-function addon.Search(input)
-    local query = input:match("^%s*(.-)%s*$")
-    local id = ParseID(query)
-    if id then
-        return { { id = id, name = addon.index[id] } }
-    end
-    local bossQuery = query:lower():match("^boss:%s*(.*)$")
-    if bossQuery then
-        if #bossQuery < 2 then return {}, "Enter at least two characters of the boss name." end
-        local loot, hint = addon.SearchBossLoot(bossQuery)
-        return loot or {}, hint
-    end
-    if #query < 2 then
-        return {}, "Enter an item or boss name, item ID, or item link."
-    end
-    if query:match("^%d+$") or query:match("^item:") or query:find("|H", 1, true) then
-        return {}, "Enter a valid item ID or item link."
-    end
-
+local function FindItems(query)
+    if query == "" then return {}, 0 end
     local entries = addon.sortedEntries
     if not entries then
         entries = {}
@@ -45,7 +28,10 @@ function addon.Search(input)
         addon.sortedEntries = entries
     end
 
-    query = query:lower()
+    return addon.FindNamedEntries(entries, query)
+end
+
+function addon.FindNamedEntries(entries, query)
     local results, prefixes, matches = {}, {}, {}
     for _, entry in ipairs(entries) do
         local start = entry.key:find(query, 1, true)
@@ -57,10 +43,48 @@ function addon.Search(input)
             matches[#matches + 1] = entry
         end
     end
+    local exactCount = #results
     for _, group in ipairs({ prefixes, matches }) do
         for _, entry in ipairs(group) do
             results[#results + 1] = entry
         end
+    end
+    return results, exactCount
+end
+
+function addon.Search(input)
+    local query = input:match("^%s*(.-)%s*$")
+    local lowerQuery = query:lower()
+    if addon.SearchPlayerSpells then
+        local spells, hint = addon.SearchPlayerSpells(lowerQuery)
+        if spells then return spells, hint end
+    end
+    if addon.AnswerQuestion then
+        local items, answer = addon.AnswerQuestion(query, FindItems)
+        if items then return items, nil, nil, answer end
+    end
+    local id = ParseID(query)
+    if id then
+        return { { id = id, name = addon.index[id] } }
+    end
+    local bossQuery = lowerQuery:match("^boss:%s*(.*)$")
+    if bossQuery then
+        if #bossQuery < 2 then return {}, "Enter at least two characters of the boss name." end
+        local loot, hint = addon.SearchBossLoot(bossQuery)
+        return loot or {}, hint
+    end
+    if #query < 2 then
+        return {}, "Enter an item or boss name, item ID, or item link."
+    end
+    if query:match("^%d+$") or query:match("^item:") or query:find("|H", 1, true) then
+        return {}, "Enter a valid item ID or item link."
+    end
+
+    query = lowerQuery
+    local results, exactCount = FindItems(query)
+    if exactCount == 0 and addon.SearchGear then
+        local gear, hint, loadStats = addon.SearchGear(query)
+        if gear then return gear, hint, loadStats end
     end
     if addon.SearchBossLoot then
         local loot, hint = addon.SearchBossLoot(query, #results > 0)

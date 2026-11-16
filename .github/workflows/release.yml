@@ -43,8 +43,8 @@ jobs:
             exit 0
           fi
           mkdir QuickItemSearch
-          cp QuickItemSearch.toc Bindings.xml ItemIndex.lua Search.lua Sources.lua UI.lua README.md LICENSE QuickItemSearch/
+          cp QuickItemSearch.toc Bindings.xml ItemIndex.lua GearIndex.lua CraftedIndex.lua SpellIndex.lua GearSearch.lua Questions.lua Search.lua SpellSearch.lua Sources.lua UI.lua README.md CHANGELOG.md LICENSE QuickItemSearch/
           archive="QuickItemSearch-$version.zip"
           zip -r "$archive" QuickItemSearch
           unzip -t "$archive"
-          gh release create "$tag" "$archive" --target "$GITHUB_SHA" --title "Quick Item Search $tag" --generate-notes
+          gh release create "$tag" "$archive" --target "$GITHUB_SHA" --title "Quick Item Search $tag" --notes-file CHANGELOG.md
