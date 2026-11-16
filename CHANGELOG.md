@@ -1,3 +1,7 @@
+## Quick Item Search 0.3.1
+
+- Drag the bottom-right corner to resize the search window. The addon saves the width and number of visible result rows.
+
 ## Quick Item Search 0.3.0
 
 - Browse mixed results in expandable sections for items, recipes, spells, gathering, trainers, boss loot, and emotes. Items marked PTR Only are hidden.
