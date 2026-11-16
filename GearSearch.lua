@@ -32,15 +32,38 @@ local slots = {
     trinket = { label = "Trinket", [12] = true }, cloak = { label = "Cloak", [16] = true },
     shield = { label = "Shield", [14] = true },
 }
-slots.rings, slots.trinkets, slots.cloaks, slots.shields = slots.ring, slots.trinket, slots.cloak, slots.shield
-slots.helm, slots.helmet, slots.boots, slots.gloves = slots.head, slots.head, slots.feet, slots.hands
-slots.belt, slots.bracers, slots.back = slots.waist, slots.wrists, slots.cloak
+local slotAliases = {
+    helm = "head", helms = "head", helmet = "head", helmets = "head", headpiece = "head",
+    necklace = "neck", necklaces = "neck", amulet = "neck", pendant = "neck",
+    shoulder = "shoulders", shoulderpad = "shoulders", shoulderpads = "shoulders",
+    chestpiece = "chest",
+    belt = "waist", belts = "waist", waistband = "waist",
+    leg = "legs", pant = "legs", pants = "legs", leggings = "legs", trousers = "legs",
+    foot = "feet", boot = "feet", boots = "feet",
+    wrist = "wrists", bracer = "wrists", bracers = "wrists",
+    hand = "hands", glove = "hands", gloves = "hands",
+    rings = "ring", trinkets = "trinket", shields = "shield",
+    back = "cloak", cape = "cloak", capes = "cloak", cloaks = "cloak",
+}
+for alias, slot in pairs(slotAliases) do slots[alias] = slots[slot] end
+
+local ARMOR_CLASS = 4
+local armorTypes = {
+    cloth = { "Cloth", 1 }, leather = { "Leather", 2 },
+    mail = { "Mail", 3 }, plate = { "Plate", 4 },
+}
+armorTypes.chainmail = armorTypes.mail
+
+local function MatchesArmorType(id, armorType)
+    local _, _, _, _, _, classID, subclassID = C_Item.GetItemInfoInstant(id)
+    return classID == ARMOR_CLASS and subclassID == armorType[2]
+end
 
 local oneHanded = { label = "One-handed weapons", [13] = true, [21] = true, [22] = true }
 local twoHanded = { label = "Two-handed weapons", [17] = true }
 local weaponSlots = {
-    ["1h"] = oneHanded, ["one-handed"] = oneHanded,
-    ["2h"] = twoHanded, ["two-handed"] = twoHanded,
+    ["1h"] = oneHanded, ["one-handed"] = oneHanded, onehanded = oneHanded, ["one handed"] = oneHanded,
+    ["2h"] = twoHanded, ["two-handed"] = twoHanded, twohanded = twoHanded, ["two handed"] = twoHanded,
 }
 
 local rarities = {
@@ -54,6 +77,8 @@ local bindingTypes = {
     boe = { "Bind on Equip", 2 },
     bop = { "Bind on Pickup", 1 },
 }
+local bindingWords = { equip = bindingTypes.boe, pickup = bindingTypes.bop }
+local approximate = { around = true, near = true, about = true }
 
 local stats = {
     agility = { "Agility", 1, "AGILITY" },
@@ -97,7 +122,11 @@ stats.spelldmg, stats["spell dmg"], stats["bonus damage"] = stats["spell damage"
 stats["hit rating"], stats["hit chance"] = stats.hit, stats.hit
 stats["crit rating"], stats["critical strike"], stats["critical strike rating"] = stats.crit, stats.crit, stats.crit
 stats["haste rating"], stats["defense rating"], stats["block rating"] = stats.haste, stats.defense, stats.block
+stats["crit chance"], stats["critical strike chance"] = stats.crit, stats.crit
+stats["dodge rating"], stats["parry rating"], stats["expertise rating"] = stats.dodge, stats.parry, stats.expertise
+stats.defence, stats["defence rating"] = stats.defense, stats.defense
 stats.ap, stats.rap, stats["mana regen"] = stats["attack power"], stats["ranged attack power"], stats.mp5
+stats["mana regeneration"], stats["health regeneration"] = stats.mp5, stats["health regen"]
 stats["spell pen"], stats["armor pen"] = stats["spell penetration"], stats["armor penetration"]
 stats["fire res"], stats["frost res"], stats["shadow res"] = stats["fire resistance"], stats["frost resistance"], stats["shadow resistance"]
 stats["nature res"], stats["arcane res"], stats["holy res"] = stats["nature resistance"], stats["arcane resistance"], stats["holy resistance"]
@@ -115,60 +144,82 @@ local function MatchStat(query)
     end
 end
 
+local function MatchSource(query, word, rest)
+    local kind, value = query:match("^(%a+):%s*(.*)$")
+    if kind == "boss" or kind == "quest" then
+        local target, tail = value:match('^"([^"]+)"(.*)$')
+        if value:sub(1, 1) ~= '"' then target, tail = value:match("^(%S+)(.*)$") end
+        if target then return kind, target, tail end
+    elseif word == "boss" then
+        return word, true, rest:match("^ drops?%f[%W](.*)$") or rest:match("^ loot%f[%W](.*)$") or rest
+    elseif word == "quest" then
+        return word, true, rest:match("^ rewards?%f[%W](.*)$") or rest
+    end
+end
+
 local function ParseGearQuery(query)
     local filters = {}
     local word, rest
-    query = query:gsub("–", "-"):gsub("—", "-"):gsub("%s+", " ")
-        :gsub("%f[%a]lvls?%f[%A]", "level"):gsub("%f[%a]lv%f[%A]", "level")
+    query = query:gsub("%s+", " ")
     while query ~= "" do
-        query = query:gsub("^for%s+(levels?%s+)", "%1")
-        local low, high, suffix = query:match("^from%s+(%d+)%s*%-%s*(%d+)(.*)$")
-        if not low then low, high, suffix = query:match("^levels?%s+(%d+)%s*%-%s*(%d+)(.*)$") end
+        local levelQuery = query:gsub("^for%s+", ""):gsub("^lvls?%s*(%d)", "level %1"):gsub("^lv%s*(%d)", "level %1")
+        levelQuery = levelQuery:gsub("^(%a+%s*%d+%s*)–", "%1-"):gsub("^(%a+%s*%d+%s*)—", "%1-")
+        local low, high, suffix = levelQuery:match("^from%s+(%d+)%s*%-%s*(%d+)(.*)$")
+        if not low then low, high, suffix = levelQuery:match("^levels?%s*(%d+)%s*%-%s*(%d+)(.*)$") end
         local hasLevel = filters.level or filters.maxLevel
         if low and not hasLevel then
             filters.minLevel, filters.maxLevel = tonumber(low), tonumber(high)
             query = suffix
         else
             local level
-            level, suffix = query:match("^level%s+(%d+)(.*)$")
+            level, suffix = levelQuery:match("^levels?%s*(%d+)(.*)$")
             if level and not hasLevel then
                 filters.level, query = tonumber(level), suffix
             else
                 word, rest = query:match("^(%S+)(.*)$")
-                local weaponSlot = weaponSlots[word]
+                local handed, weaponTail = query:match("^(%a+ handed)%f[%W](.*)$")
+                local weaponSlot = weaponSlots[handed or word]
                 local rarityWord, rarityTail = query:match("^rarity (%S+)(.*)$")
+                if not rarityWord then rarityWord, rarityTail = query:match("^quality (%S+)(.*)$") end
                 local rarity = rarities[rarityWord or word]
-                local bossSuffix = query:match("^boss%s+drops?%f[%W](.*)$")
-                if bossSuffix and not filters.boss then
-                    filters.boss, query = true, bossSuffix
-                elseif (word == "crafted" or word == "craftable") and not filters.crafted then
+                local bindingWord, bindingTail = query:match("^binds? on (%S+)(.*)$")
+                local binding = bindingTypes[word] or bindingWords[bindingWord]
+                local source, target, tail = MatchSource(query, word, rest)
+                if source and not filters[source] then
+                    filters[source], query = target, tail
+                elseif (word == "crafted" or word == "craftable" or word == "handcrafted") and not filters.crafted then
                     filters.crafted = true
                     query = query:match("^%a+%s+gear%f[%W](.*)$") or rest
                 elseif weaponSlot and not filters.slot then
                     filters.slot = weaponSlot
-                    query = rest:match("^ weapons?%f[%W](.*)$") or rest:match("^ weps?%f[%W](.*)$") or rest
+                    local tail = weaponTail or rest
+                    query = tail:match("^ weapons?%f[%W](.*)$") or tail:match("^ weps?%f[%W](.*)$") or tail
                 elseif slots[word] and not filters.slot then
                     filters.slot, query = slots[word], rest
+                elseif armorTypes[word] and not filters.armorType then
+                    filters.armorType = armorTypes[word]
+                    query = rest:match("^ armou?r%f[%W](.*)$") or rest
                 elseif rarity and not filters.rarity then
                     filters.rarity, query = rarity, rarityTail or rest
-                elseif bindingTypes[word] and not filters.binding then
-                    filters.binding, query = bindingTypes[word], rest
+                elseif binding and not filters.binding then
+                    filters.binding, query = binding, bindingTail or rest
                 else
                     local stat, statTail = MatchStat(query)
                     if not stat or filters.stat then return end
                     filters.stat = stat
-                    local amount
-                    amount, suffix = statTail:match("^%s+around%s+%+?(%d+)(.*)$")
-                    if not amount then amount, suffix = statTail:match("^%s+near%s+%+?(%d+)(.*)$") end
-                    filters.near = tonumber(amount)
-                    query = suffix or statTail
+                    local modifier, amount, amountTail = statTail:match("^%s+(%a+)%s+%+?(%d+)(.*)$")
+                    if approximate[modifier] then
+                        filters.near, query = tonumber(amount), amountTail
+                    else
+                        query = statTail
+                    end
                 end
             end
         end
         if query ~= "" and not query:match("^%s") then return end
         query = query:match("^%s*(.*)$")
     end
-    if filters.slot or filters.level or filters.maxLevel or filters.boss or filters.crafted
+    if filters.slot or filters.armorType or filters.level or filters.maxLevel or filters.boss or filters.quest or filters.crafted
         or filters.rarity or filters.binding or filters.stat then return filters end
 end
 
@@ -229,22 +280,33 @@ end
 local function Describe(filters)
     local parts = {}
     if filters.slot then parts[#parts + 1] = filters.slot.label end
+    if filters.armorType then parts[#parts + 1] = filters.armorType[1] end
     if filters.rarity then parts[#parts + 1] = filters.rarity[1] end
     if filters.binding then parts[#parts + 1] = filters.binding[1] end
     if filters.maxLevel then
         parts[#parts + 1] = ("Requires level %d-%d"):format(filters.minLevel, filters.maxLevel)
     end
-    if filters.boss then parts[#parts + 1] = "Boss drops" end
+    if filters.boss then
+        parts[#parts + 1] = filters.boss == true and "Boss drops" or "Boss: " .. filters.boss:gsub("|", "||")
+    end
+    if filters.quest then
+        parts[#parts + 1] = filters.quest == true and "Quest rewards" or "Quest: " .. filters.quest:gsub("|", "||")
+    end
     if filters.crafted then parts[#parts + 1] = "Crafted gear" end
+    if filters.profession then parts[#parts + 1] = filters.profession end
     if filters.stat then
         parts[#parts + 1] = filters.stat[1] .. (filters.near and (" near +" .. filters.near) or "")
     end
     return table.concat(parts, " · ")
 end
 
-function addon.SearchGear(query)
+function addon.SearchGear(query, requireCombinedBoss, craftedOnly, profession)
     local filters = ParseGearQuery(query)
     if not filters then return end
+    if requireCombinedBoss and not (filters.slot or filters.armorType or filters.level or filters.maxLevel or filters.quest
+        or filters.crafted or filters.rarity or filters.binding or filters.stat) then return end
+    if craftedOnly then filters.crafted = true end
+    filters.profession = profession
     if filters.level then
         if filters.level < 1 or filters.level > 999 then return {}, "Enter a positive character level from 1 to 999." end
         local below, above = addon.GetLevelWindow()
@@ -259,9 +321,17 @@ function addon.SearchGear(query)
 
     local bossDrops
     if filters.boss then
-        bossDrops = addon.GetBossDropItems()
-        if not bossDrops then return {}, "AtlasLoot boss data is unavailable." end
+        local hint
+        bossDrops, hint = addon.GetBossDropItems(filters.boss ~= true and filters.boss or nil)
+        if not bossDrops then return {}, hint or "AtlasLoot boss data is unavailable." end
     end
+    local isQuestReward
+    if filters.quest then
+        local hint
+        isQuestReward, hint = addon.GetQuestRewardFilter(filters.quest ~= true and filters.quest or nil)
+        if not isQuestReward then return {}, hint end
+    end
+    if filters.armorType and not (C_Item and C_Item.GetItemInfoInstant) then return {}, "Armor type data is unavailable." end
     if filters.stat and not C_Item.GetItemStats then return {}, "Item stats are unavailable." end
 
     local stat = filters.stat
@@ -314,14 +384,27 @@ function addon.SearchGear(query)
         return results, hint
     end
 
+    local function MatchesCraft(id)
+        if profession then
+            for _, recipe in ipairs(addon.GetItemRecipes(id) or {}) do
+                if recipe.profession == profession then return true end
+            end
+            return false
+        end
+        return not filters.crafted or addon.crafted[id]
+    end
+
     for id, gear in pairs(addon.gear) do
         local slot, level, flags = gear[1], gear[2], gear[3]
-        if (not filters.slot or filters.slot[slot])
+        if not addon.IsPTRItem(id)
+            and (not filters.slot or filters.slot[slot])
             and (not filters.rarity or gear[4] == filters.rarity[2])
             and (not filters.binding or gear[5] == filters.binding[2])
             and (not filters.maxLevel or (level >= filters.minLevel and level <= filters.maxLevel))
-            and (not filters.crafted or addon.crafted[id])
-            and (not bossDrops or bossDrops[id]) then
+            and MatchesCraft(id)
+            and (not filters.armorType or MatchesArmorType(id, filters.armorType))
+            and (not bossDrops or bossDrops[id])
+            and (not isQuestReward or isQuestReward(id)) then
             if not stat then
                 AddMatch(id, gear)
             elseif (HasStat(flags, stat) or (includesShared and HasStat(flags, spellPower))) and not CheckStat(id, gear) then

@@ -11,3 +11,4 @@ optional-dependencies:
 ignore:
   - .github
   - scripts
+  - tests

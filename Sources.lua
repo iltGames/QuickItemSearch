@@ -57,7 +57,7 @@ local function AtlasIndex()
                             end
                         end
                         if next(lootIDs) then
-                            bosses[#bosses + 1] = { name = name, key = name:lower(), loot = lootIDs }
+                            bosses[#bosses + 1] = { name = name, key = name:lower(), loot = lootIDs, isEncounter = not boss.ExtraList }
                         end
                     end
                 end
@@ -68,30 +68,44 @@ local function AtlasIndex()
     return items, bosses, bossDrops
 end
 
-function addon.GetBossDropItems()
-    local ok, _, _, bossDrops = pcall(AtlasIndex)
-    if ok and bossDrops then return bossDrops end
+local function FindBossMatches(bosses, query, exactOnly, encountersOnly)
+    local exact, partial = {}, {}
+    for _, boss in ipairs(bosses) do
+        if not encountersOnly or boss.isEncounter then
+            if boss.key == query then
+                exact[#exact + 1] = boss
+            elseif not exactOnly and boss.key:find(query, 1, true) then
+                partial[#partial + 1] = boss
+            end
+        end
+    end
+    return #exact > 0 and exact or partial
+end
+
+function addon.GetBossDropItems(query)
+    local ok, _, bosses, bossDrops = pcall(AtlasIndex)
+    if not ok or not bossDrops then return nil, "AtlasLoot boss data is unavailable." end
+    if not query then return bossDrops end
+
+    local matches = FindBossMatches(bosses, query, false, true)
+    if #matches == 0 then return nil, "No matching bosses." end
+    local drops = {}
+    for _, boss in ipairs(matches) do
+        for id in pairs(boss.loot) do drops[id] = true end
+    end
+    return drops
 end
 
 function addon.SearchBossLoot(query, exactOnly)
     local ok, _, bosses = pcall(AtlasIndex)
     if not ok or not bosses or #bosses == 0 then return nil, "AtlasLoot boss data is unavailable." end
-
-    local exact, partial = {}, {}
-    for _, boss in ipairs(bosses) do
-        if boss.key == query then
-            exact[#exact + 1] = boss
-        elseif not exactOnly and boss.key:find(query, 1, true) then
-            partial[#partial + 1] = boss
-        end
-    end
-    local matches = #exact > 0 and exact or partial
+    local matches = FindBossMatches(bosses, query, exactOnly)
     if #matches == 0 then return nil, "No matching bosses." end
 
     local results, seen = {}, {}
     for _, boss in ipairs(matches) do
         for id in pairs(boss.loot) do
-            if not seen[id] then
+            if not seen[id] and not addon.IsPTRItem(id) then
                 seen[id] = true
                 local name = addon.index[id]
                 results[#results + 1] = { id = id, name = name, key = name and name:lower() or "~" }
@@ -186,6 +200,49 @@ function addon.GetItemSources(itemID)
     AddRows(result, backup[itemID])
     if hasLiveSources then backup[itemID] = result end
     return result
+end
+
+function addon.GetQuestRewardFilter(query)
+    local db = _G.LibQuestieDB
+    local getItem = db and db.Item and db.Item.Get
+    local getQuest = db and db.Quest and db.Quest.Get
+    local backup = _G[storageName]
+    local questID = query and tonumber(query:match("^%d+$"))
+    if not getItem or (query and not questID and not getQuest) then
+        local hasCachedQuests = false
+        for _, rows in pairs(backup or {}) do
+            for _, row in ipairs(rows) do
+                if row.kind == "quest" then hasCachedQuests = true; break end
+            end
+            if hasCachedQuests then break end
+        end
+        if not hasCachedQuests then return nil, "QuestieDB quest reward data is unavailable." end
+    end
+
+    local titleMatches = {}
+    local function Matches(id, name)
+        if not query then return true end
+        if questID then return id == questID end
+        name = Clean(name)
+        return name and name:lower():find(query, 1, true) ~= nil
+    end
+
+    return function(itemID)
+        local ids = getItem and getItem(itemID, "questRewards")
+        if type(ids) == "table" then
+            for _, id in ipairs(ids) do
+                if titleMatches[id] == nil then
+                    local name = query and not questID and getQuest and getQuest(id, "name")
+                    titleMatches[id] = Matches(id, name) or false
+                end
+                if titleMatches[id] then return true end
+            end
+        end
+        for _, row in ipairs(backup and backup[itemID] or {}) do
+            if row.kind == "quest" and Matches(row.id, row.name) then return true end
+        end
+        return false
+    end
 end
 
 local LABELS = { drop = "Drops from", object = "Found in", container = "Found in", vendor = "Sold by", quest = "Quest reward" }

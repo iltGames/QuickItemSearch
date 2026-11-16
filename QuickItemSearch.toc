@@ -1,19 +1,23 @@
 ## Interface: 16001
 ## Title: Quick Item Search
 ## Notes: Search WoW Forever items and view their in-game tooltips.
-## Version: 0.2.0
+## Version: 0.3.0
 ## IconTexture: Interface\Icons\INV_Misc_Spyglass_03
 ## AddonCompartmentFunc: QuickItemSearch_Toggle
 ## OptionalDeps: AtlasLootClassic, QuestieDB, Questie
 ## SavedVariables: QuickItemSearchSourceDB, QuickItemSearchSettings
 
 ItemIndex.lua
+PtrItemIndex.lua
 GearIndex.lua
 CraftedIndex.lua
 SpellIndex.lua
+RecipeIndex.lua
 GearSearch.lua
 Questions.lua
 Search.lua
 SpellSearch.lua
+EmoteSearch.lua
+RecipeSearch.lua
 Sources.lua
 UI.lua
