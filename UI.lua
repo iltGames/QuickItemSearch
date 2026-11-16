@@ -1,11 +1,11 @@
 local addonName, addon = ...
 local settingsKey = addonName .. "Settings"
-local VISIBLE_ROWS = 8
+local DEFAULT_ROWS, MIN_ROWS, MAX_ROWS = 8, 3, 20
 local SECTION_PREVIEW_ROWS = 3
 local ROW_HEIGHT = 30
 local RESULTS_TOP = 55
 local FOOTER_HEIGHT = 28
-local WIDTH = 560
+local DEFAULT_WIDTH, MIN_WIDTH, MAX_WIDTH = 560, 430, 1100
 local SCROLLBAR_WIDTH = 12
 local QUESTION_MARK = 134400
 local ARROW_HOLD_DELAY = 0.32
@@ -26,7 +26,9 @@ local COLORS = {
     mutedText = { 0.71, 0.66, 0.57 },
 }
 local frame, searchBox, summary, message, range, scrollbar
-local keyboardHint
+local keyboardHint, resizeHandle
+local visibleRows, fixedHeight = DEFAULT_ROWS, false
+local resizing
 local arrowSelected, resultKeyboardActive, pressedResultEnter
 local heldArrow, arrowTimer
 local SEARCH_KEYS = "Up / Down   Navigate     Enter   Release Focus     Esc   Close"
@@ -136,7 +138,8 @@ end
 
 local function ResizePanel()
     local actionHeight = message:IsShown() and 18 or 0
-    frame:SetHeight(ResultsTop() + math.min(VISIBLE_ROWS, #results) * ROW_HEIGHT + FOOTER_HEIGHT + actionHeight)
+    local heightRows = fixedHeight and visibleRows or math.min(visibleRows, #results)
+    frame:SetHeight(ResultsTop() + heightRows * ROW_HEIGHT + FOOTER_HEIGHT + actionHeight)
 end
 
 local function SetActionMessage(text)
@@ -146,16 +149,16 @@ local function SetActionMessage(text)
 end
 
 local function RenderResults()
-    local canScroll = #results > VISIBLE_ROWS
+    local canScroll = #results > visibleRows
     local top = ResultsTop()
     for index, row in ipairs(rows) do
         local resultIndex = firstVisible + index - 1
-        row.entry = results[resultIndex]
+        row.entry = index <= visibleRows and results[resultIndex] or nil
         row.resultIndex = resultIndex
         SetRowSelected(row, row.entry ~= nil and resultIndex == selected)
         if row.entry then
             row:SetPoint("TOPLEFT", 8, -top - (index - 1) * ROW_HEIGHT)
-            row:SetWidth(WIDTH - 16 - (canScroll and SCROLLBAR_WIDTH or 0))
+            row:SetWidth(frame:GetWidth() - 16 - (canScroll and SCROLLBAR_WIDTH or 0))
             UpdateRow(row)
             row:Show()
         else
@@ -163,7 +166,7 @@ local function RenderResults()
         end
     end
 
-    local visible = math.min(VISIBLE_ROWS, math.max(0, #results - firstVisible + 1))
+    local visible = math.min(visibleRows, math.max(0, #results - firstVisible + 1))
     ResizePanel()
     if visible > 0 then
         range:SetFormattedText("%d-%d of %d", firstVisible, firstVisible + visible - 1, #results)
@@ -173,11 +176,13 @@ local function RenderResults()
 
     scrollbar:SetShown(canScroll)
     if canScroll then
-        local height = VISIBLE_ROWS * ROW_HEIGHT
+        local height = visibleRows * ROW_HEIGHT
+        scrollbar:SetHeight(height)
+        scrollbar:SetStepsPerPage(visibleRows)
         scrollbar:SetPoint("TOPRIGHT", -8, -top)
-        scrollbar:GetThumbTexture():SetHeight(math.max(16, height * VISIBLE_ROWS / #results))
+        scrollbar:GetThumbTexture():SetHeight(math.max(16, height * visibleRows / #results))
         syncingScrollbar = true
-        scrollbar:SetMinMaxValues(1, #results - VISIBLE_ROWS + 1)
+        scrollbar:SetMinMaxValues(1, #results - visibleRows + 1)
         scrollbar:SetValue(firstVisible)
         syncingScrollbar = false
     end
@@ -308,7 +313,7 @@ local function RenderSearchSections(collapsedTitle)
             AppendSection(section.title, section.rows)
         end
     end
-    firstVisible = math.min(firstVisible, math.max(1, #results - VISIBLE_ROWS + 1))
+    firstVisible = math.min(firstVisible, math.max(1, #results - visibleRows + 1))
     RenderResults()
 end
 
@@ -483,8 +488,8 @@ local function MoveSelection(delta)
     selected = nextSelection
     if selected < firstVisible then
         firstVisible = selected
-    elseif selected >= firstVisible + VISIBLE_ROWS then
-        firstVisible = selected - VISIBLE_ROWS + 1
+    elseif selected >= firstVisible + visibleRows then
+        firstVisible = selected - visibleRows + 1
     end
     RefreshNavigation()
     return true
@@ -511,12 +516,12 @@ local function PressArrow(key)
 end
 
 local function ScrollTo(first)
-    local lastStart = math.max(1, #results - VISIBLE_ROWS + 1)
+    local lastStart = math.max(1, #results - visibleRows + 1)
     local nextStart = math.max(1, math.min(lastStart, first))
     if nextStart == firstVisible then return end
     ReleaseResultKeyboard()
     firstVisible = nextStart
-    selected = math.max(firstVisible, math.min(selected, firstVisible + VISIBLE_ROWS - 1))
+    selected = math.max(firstVisible, math.min(selected, firstVisible + visibleRows - 1))
     RefreshNavigation()
 end
 
@@ -526,10 +531,7 @@ local function OnMouseWheel(_, direction)
     ScrollTo(firstVisible + (direction > 0 and -1 or 1))
 end
 
-local function StopMovingWindow()
-    if not moving then return end
-    moving = false
-    frame:StopMovingOrSizing()
+local function SaveWindowPosition()
     local x, top = frame:GetCenter(), frame:GetTop()
     local parentX, parentTop = UIParent:GetCenter(), UIParent:GetTop()
     if not (x and top and parentX and parentTop) then return end
@@ -540,14 +542,78 @@ local function StopMovingWindow()
     frame:SetPoint("TOP", UIParent, "TOP", settings.x, settings.y)
 end
 
+local function StopMovingWindow()
+    if not moving then return end
+    moving = false
+    frame:StopMovingOrSizing()
+    SaveWindowPosition()
+end
+
+local function Clamp(value, low, high)
+    return math.max(low, math.min(value, high))
+end
+
+local function StopResizingWindow()
+    if not resizing then return end
+    resizing = false
+    resizeHandle:SetScript("OnUpdate", nil)
+    local settings = _G[settingsKey]
+    settings.width = frame:GetWidth()
+    settings.rows = fixedHeight and visibleRows or nil
+    SaveWindowPosition()
+end
+
+local function StartResizingWindow()
+    StopMovingWindow()
+    ReleaseResultKeyboard()
+    HideHover()
+
+    local x, y = GetCursorPosition()
+    local scale = frame:GetEffectiveScale()
+    local left, top = frame:GetLeft(), frame:GetTop()
+    local parentLeft, parentTop = UIParent:GetLeft(), UIParent:GetTop()
+    if not (left and top and parentLeft and parentTop) then return end
+
+    local startWidth, startRows = frame:GetWidth(), visibleRows
+    local displayedRows = fixedHeight and startRows or math.min(startRows, #results)
+    local wasFixed = fixedHeight
+    local maxWidth = math.max(MIN_WIDTH, math.min(MAX_WIDTH, UIParent:GetWidth()))
+    local maxRows = math.max(MIN_ROWS, math.min(MAX_ROWS,
+        math.floor((UIParent:GetHeight() - ResultsTop() - FOOTER_HEIGHT - 18) / ROW_HEIGHT)))
+    frame:ClearAllPoints()
+    frame:SetPoint("TOPLEFT", UIParent, "TOPLEFT", left - parentLeft, top - parentTop)
+    resizing = true
+
+    resizeHandle:SetScript("OnUpdate", function()
+        local cursorX, cursorY = GetCursorPosition()
+        local width = Clamp(math.floor(startWidth + (cursorX - x) / scale + 0.5), MIN_WIDTH, maxWidth)
+        local rowDelta = math.floor((y - cursorY) / (scale * ROW_HEIGHT) + 0.5)
+        local nextFixed = wasFixed or (rowDelta ~= 0 and displayedRows + rowDelta >= MIN_ROWS)
+        local nextRows = nextFixed and Clamp(displayedRows + rowDelta, MIN_ROWS, maxRows) or startRows
+        if width == frame:GetWidth() and nextRows == visibleRows and nextFixed == fixedHeight then return end
+
+        frame:SetWidth(width)
+        visibleRows, fixedHeight = nextRows, nextFixed
+        firstVisible = Clamp(firstVisible, math.max(1, selected - visibleRows + 1),
+            math.max(1, #results - visibleRows + 1))
+        HideHover()
+        RenderResults()
+    end)
+end
+
 local function CreateWindow()
     local settings = _G[settingsKey]
     if type(settings) ~= "table" then
         settings = {}
         _G[settingsKey] = settings
     end
+    local savedRows = tonumber(settings.rows)
+    fixedHeight = savedRows ~= nil
+    visibleRows = savedRows and Clamp(math.floor(savedRows), MIN_ROWS, MAX_ROWS) or DEFAULT_ROWS
+    local width = Clamp(tonumber(settings.width) or DEFAULT_WIDTH, MIN_WIDTH,
+        math.max(MIN_WIDTH, math.min(MAX_WIDTH, UIParent:GetWidth())))
     frame = CreateFrame("Frame", "QuickItemSearchFrame", UIParent, "BackdropTemplate")
-    frame:SetSize(WIDTH, RESULTS_TOP + FOOTER_HEIGHT)
+    frame:SetSize(width, RESULTS_TOP + FOOTER_HEIGHT)
     frame:SetPoint("TOP", UIParent, "TOP", tonumber(settings.x) or 0, tonumber(settings.y) or -130)
     frame:SetFrameStrata("DIALOG")
     frame:SetMovable(true)
@@ -577,8 +643,9 @@ local function CreateWindow()
     divider:SetPoint("TOPRIGHT", -8, -53)
 
     searchBox = CreateFrame("EditBox", nil, frame, "SearchBoxTemplate")
-    searchBox:SetSize(WIDTH - 48, 34)
+    searchBox:SetHeight(34)
     searchBox:SetPoint("TOPLEFT", 24, -13)
+    searchBox:SetPoint("TOPRIGHT", -24, -13)
     searchBox:SetFontObject("GameFontHighlightLarge")
     searchBox:SetTextColor(unpack(COLORS.text))
     searchBox:SetAltArrowKeyMode(false)
@@ -620,9 +687,10 @@ local function CreateWindow()
     end)
     searchBox:SetScript("OnEscapePressed", function() frame:Hide() end)
 
-    for index = 1, VISIBLE_ROWS do
+    for index = 1, MAX_ROWS do
         local row = CreateFrame("Button", nil, frame)
-        row:SetSize(WIDTH - 16, ROW_HEIGHT)
+        row:SetHeight(ROW_HEIGHT)
+        row:Hide()
         row.selection = row:CreateTexture(nil, "BACKGROUND")
         row.selection:SetAllPoints()
         row.selection:SetColorTexture(unpack(COLORS.selection))
@@ -675,7 +743,7 @@ local function CreateWindow()
 
     summary = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     summary:SetPoint("TOPLEFT", 14, -RESULTS_TOP)
-    summary:SetWidth(WIDTH - 28)
+    summary:SetPoint("TOPRIGHT", -14, -RESULTS_TOP)
     summary:SetJustifyH("LEFT")
     summary:SetWordWrap(true)
     summary:SetTextColor(unpack(COLORS.text))
@@ -689,7 +757,10 @@ local function CreateWindow()
     range:SetPoint("BOTTOMLEFT", 14, 12)
     range:SetTextColor(unpack(COLORS.mutedText))
     keyboardHint = frame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    keyboardHint:SetPoint("BOTTOMRIGHT", -14, 12)
+    keyboardHint:SetPoint("BOTTOMRIGHT", -23, 12)
+    keyboardHint:SetPoint("LEFT", range, "RIGHT", 8, 0)
+    keyboardHint:SetJustifyH("RIGHT")
+    keyboardHint:SetWordWrap(false)
     keyboardHint:SetText(SEARCH_KEYS)
     keyboardHint:SetTextColor(unpack(COLORS.mutedText))
     local dragHandle = CreateFrame("Frame", nil, frame)
@@ -699,6 +770,7 @@ local function CreateWindow()
     dragHandle:EnableMouse(true)
     dragHandle:RegisterForDrag("LeftButton")
     dragHandle:SetScript("OnDragStart", function()
+        StopResizingWindow()
         HideHover()
         frame:StartMoving()
         frame:SetUserPlaced(false)
@@ -711,12 +783,21 @@ local function CreateWindow()
     grip:SetPoint("CENTER")
     grip:SetColorTexture(unpack(COLORS.accent))
 
+    resizeHandle = CreateFrame("Button", nil, frame)
+    resizeHandle:SetSize(18, 18)
+    resizeHandle:SetPoint("BOTTOMRIGHT", -3, 3)
+    resizeHandle:SetNormalTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Up")
+    resizeHandle:SetHighlightTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Highlight")
+    resizeHandle:RegisterForDrag("LeftButton")
+    resizeHandle:SetScript("OnDragStart", StartResizingWindow)
+    resizeHandle:SetScript("OnDragStop", StopResizingWindow)
+
     scrollbar = CreateFrame("Slider", nil, frame)
     scrollbar:SetOrientation("VERTICAL")
-    scrollbar:SetSize(SCROLLBAR_WIDTH, VISIBLE_ROWS * ROW_HEIGHT)
+    scrollbar:SetSize(SCROLLBAR_WIDTH, visibleRows * ROW_HEIGHT)
     scrollbar:SetValueStep(1)
     scrollbar:SetObeyStepOnDrag(true)
-    scrollbar:SetStepsPerPage(VISIBLE_ROWS)
+    scrollbar:SetStepsPerPage(visibleRows)
     scrollbar:EnableMouse(true)
     scrollbar:EnableMouseWheel(true)
     scrollbar:SetScript("OnMouseWheel", OnMouseWheel)
@@ -773,6 +854,7 @@ local function CreateWindow()
         end
     end)
     frame:SetScript("OnHide", function()
+        StopResizingWindow()
         ReleaseResultKeyboard()
         CancelStatSearch()
         StopMovingWindow()
