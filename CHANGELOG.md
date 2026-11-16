@@ -1,3 +1,7 @@
+## Quick Item Search 0.3.2
+
+- Drag the bottom-right corner to set the search window width and the maximum number of visible result rows. The window fits smaller result sets and opens at its compact height when the search is empty.
+
 ## Quick Item Search 0.3.0
 
 - Browse mixed results in expandable sections for items, recipes, spells, gathering, trainers, boss loot, and emotes. Items marked PTR Only are hidden.
