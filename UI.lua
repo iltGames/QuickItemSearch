@@ -27,8 +27,8 @@ local COLORS = {
 }
 local frame, searchBox, summary, message, range, scrollbar
 local keyboardHint, resizeHandle
-local visibleRows, fixedHeight = DEFAULT_ROWS, false
-local resizing
+local visibleRows = DEFAULT_ROWS
+local resizing, resizePreviewRows
 local arrowSelected, resultKeyboardActive, pressedResultEnter
 local heldArrow, arrowTimer
 local SEARCH_KEYS = "Up / Down   Navigate     Enter   Release Focus     Esc   Close"
@@ -138,7 +138,7 @@ end
 
 local function ResizePanel()
     local actionHeight = message:IsShown() and 18 or 0
-    local heightRows = fixedHeight and visibleRows or math.min(visibleRows, #results)
+    local heightRows = resizePreviewRows or math.min(visibleRows, #results)
     frame:SetHeight(ResultsTop() + heightRows * ROW_HEIGHT + FOOTER_HEIGHT + actionHeight)
 end
 
@@ -559,7 +559,9 @@ local function StopResizingWindow()
     resizeHandle:SetScript("OnUpdate", nil)
     local settings = _G[settingsKey]
     settings.width = frame:GetWidth()
-    settings.rows = fixedHeight and visibleRows or nil
+    if resizePreviewRows then settings.rows = visibleRows end
+    resizePreviewRows = nil
+    ResizePanel()
     SaveWindowPosition()
 end
 
@@ -575,8 +577,7 @@ local function StartResizingWindow()
     if not (left and top and parentLeft and parentTop) then return end
 
     local startWidth, startRows = frame:GetWidth(), visibleRows
-    local displayedRows = fixedHeight and startRows or math.min(startRows, #results)
-    local wasFixed = fixedHeight
+    local displayedRows = math.min(startRows, #results)
     local maxWidth = math.max(MIN_WIDTH, math.min(MAX_WIDTH, UIParent:GetWidth()))
     local maxRows = math.max(MIN_ROWS, math.min(MAX_ROWS,
         math.floor((UIParent:GetHeight() - ResultsTop() - FOOTER_HEIGHT - 18) / ROW_HEIGHT)))
@@ -588,12 +589,15 @@ local function StartResizingWindow()
         local cursorX, cursorY = GetCursorPosition()
         local width = Clamp(math.floor(startWidth + (cursorX - x) / scale + 0.5), MIN_WIDTH, maxWidth)
         local rowDelta = math.floor((y - cursorY) / (scale * ROW_HEIGHT) + 0.5)
-        local nextFixed = wasFixed or (rowDelta ~= 0 and displayedRows + rowDelta >= MIN_ROWS)
-        local nextRows = nextFixed and Clamp(displayedRows + rowDelta, MIN_ROWS, maxRows) or startRows
-        if width == frame:GetWidth() and nextRows == visibleRows and nextFixed == fixedHeight then return end
+        local previewRows
+        if rowDelta ~= 0 and (displayedRows >= MIN_ROWS or displayedRows + rowDelta >= MIN_ROWS) then
+            previewRows = Clamp(displayedRows + rowDelta, MIN_ROWS, maxRows)
+        end
+        local nextRows = previewRows or startRows
+        if width == frame:GetWidth() and nextRows == visibleRows and previewRows == resizePreviewRows then return end
 
         frame:SetWidth(width)
-        visibleRows, fixedHeight = nextRows, nextFixed
+        visibleRows, resizePreviewRows = nextRows, previewRows
         firstVisible = Clamp(firstVisible, math.max(1, selected - visibleRows + 1),
             math.max(1, #results - visibleRows + 1))
         HideHover()
@@ -608,7 +612,6 @@ local function CreateWindow()
         _G[settingsKey] = settings
     end
     local savedRows = tonumber(settings.rows)
-    fixedHeight = savedRows ~= nil
     visibleRows = savedRows and Clamp(math.floor(savedRows), MIN_ROWS, MAX_ROWS) or DEFAULT_ROWS
     local width = Clamp(tonumber(settings.width) or DEFAULT_WIDTH, MIN_WIDTH,
         math.max(MIN_WIDTH, math.min(MAX_WIDTH, UIParent:GetWidth())))

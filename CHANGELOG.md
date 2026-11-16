@@ -1,6 +1,6 @@
-## Quick Item Search 0.3.1
+## Quick Item Search 0.3.2
 
-- Drag the bottom-right corner to resize the search window. The addon saves the width and number of visible result rows.
+- Drag the bottom-right corner to set the search window width and the maximum number of visible result rows. The window fits smaller result sets and opens at its compact height when the search is empty.
 
 ## Quick Item Search 0.3.0
 

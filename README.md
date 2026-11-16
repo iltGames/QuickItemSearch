@@ -4,7 +4,7 @@ Press Ctrl+Shift+Space to open search when the chord is free. To change it, open
 
 Use `/qis` to open search or `/qis linen cloth` to open it with a query. `/itemsearch` is also available.
 
-Search by English item name, numeric ID, or pasted item link. Use Up and Down to browse results, scroll one row at a time with the mouse wheel, or drag the scrollbar on longer lists. Press Enter to activate an arrow-selected result or leave the search field after typing. Out of combat, you can keep using the arrows and Enter after activating a result. Hover for a tooltip, click to inspect, Shift-click to insert a link into open chat, or Ctrl-click to try on supported equipment. Escape closes the search overlay. Drag the bottom-right corner to resize the overlay. Width and the number of visible rows are saved between sessions.
+Search by English item name, numeric ID, or pasted item link. Use Up and Down to browse results, scroll one row at a time with the mouse wheel, or drag the scrollbar on longer lists. Press Enter to activate an arrow-selected result or leave the search field after typing. Out of combat, you can keep using the arrows and Enter after activating a result. Hover for a tooltip, click to inspect, Shift-click to insert a link into open chat, or Ctrl-click to try on supported equipment. Escape closes the search overlay. Drag the bottom-right corner to resize the overlay. The window width and maximum number of visible rows are saved between sessions.
 
 With AtlasLoot Classic Forever enabled, search for a boss by name to see its loot. Use `boss:<name>` to prioritize the boss's loot. Items marked **PTR Only** in the bundled client data are filtered out.
 
