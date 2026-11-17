@@ -265,6 +265,20 @@ end
 function addon.Search(input)
     local query = input:match("^%s*(.-)%s*$")
     local lowerQuery = query:lower()
+    if addon.SearchClassSpellUnlocks then
+        local rows, hint, load, title = addon.SearchClassSpellUnlocks(lowerQuery)
+        if rows then
+            local function WithSection(entries, message)
+                return entries, message, nil, nil, title and #entries > 0 and { title = title } or nil
+            end
+            if load then
+                return rows, hint, function(done)
+                    return load(function(entries, message) done(WithSection(entries, message)) end)
+                end, nil, title and #rows > 0 and { title = title } or nil
+            end
+            return WithSection(rows, hint)
+        end
+    end
     if lowerQuery == "@target" then return addon.SearchTargetLoot() end
     local shortcut, instanceQuery = lowerQuery:match("^(@?%a+)%s+(.*)$")
     shortcut = shortcut or lowerQuery

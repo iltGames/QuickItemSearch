@@ -84,6 +84,10 @@ end
 
 toggle()
 ExpectHeight(83, "examples must stay out of the main results")
+assert(QuickItemSearchCloseButton, "the search window needs a close button")
+QuickItemSearchCloseButton:Click()
+assert(not QuickItemSearchFrame:IsShown(), "the close button must hide the search window")
+toggle()
 local function ClickButton(label)
     for _, button in ipairs(buttons) do
         if button.text == label or button.tooltipText == label then

@@ -25,6 +25,18 @@ function readTable(file, layout, readRow) {
         fields.push({ start: data.readUInt16LE(offset), width: data.readUInt16LE(offset + 2), type, palette });
         if (type === 3 || type === 4) palette += u32(offset + 4);
     }
+    let common = palette;
+    for (let index = 0; index < fields.length; index++) {
+        const field = fields[index];
+        if (field.type !== 2) continue;
+        const offset = storage + index * 24;
+        field.defaultValue = u32(offset + 12);
+        field.overrides = new Map();
+        for (let size = 0; size < u32(offset + 4); size += 8) {
+            field.overrides.set(u32(common + size), u32(common + size + 4));
+        }
+        common += u32(offset + 4);
+    }
 
     const rows = new Map();
     const copies = [];
@@ -43,6 +55,10 @@ function readTable(file, layout, readRow) {
             const record = start + index * recordSize;
             function value(fieldIndex) {
                 const field = fields[fieldIndex];
+                if (field.type === 2) {
+                    const id = idBytes ? u32(idStart + index * 4) : value(data.readUInt16LE(174));
+                    return field.overrides.get(id) ?? field.defaultValue;
+                }
                 if (field.type !== 0 && field.type !== 3 && field.type !== 5) {
                     throw new Error(`Unsupported field encoding ${field.type} in ${file}.`);
                 }
@@ -85,7 +101,7 @@ function readString(data, offset, end) {
 
 const names = readTable(spellNamePath, 0x782ee721, (id, _, name) => [id, name()]);
 const skills = readTable(skillLinePath, 0x6763217c, (_, value, name) => [value(5), { name: name(), category: value(6) }]);
-const abilities = readTable(abilityPath, 0x224f7ea0, (_, value) => [value(2), { skill: value(3), spell: value(4) }]);
+const abilities = readTable(abilityPath, 0x224f7ea0, (_, value) => [value(2), { skill: value(3), spell: value(4), classMask: value(6) }]);
 console.log(`Read ${names.rows.size} spell names and ${abilities.rows.size} skill-line abilities.`);
 
 const tables = new Map([[names.hash, names], [skills.hash, skills], [abilities.hash, abilities]]);
@@ -114,8 +130,8 @@ for (let offset = 44; offset < cache.length;) {
         }
         if (table === abilities) {
             const pos = readString(cache, first.next, end).next;
-            if (pos + 10 > end) throw new Error("Truncated SkillLineAbility hotfix.");
-            abilities.rows.set(id, { skill: cache.readUInt16LE(pos + 4), spell: cache.readUInt32LE(pos + 6) });
+            if (pos + 16 > end) throw new Error("Truncated SkillLineAbility hotfix.");
+            abilities.rows.set(id, { skill: cache.readUInt16LE(pos + 4), spell: cache.readUInt32LE(pos + 6), classMask: cache.readUInt32LE(pos + 12) });
         }
     }
     offset = end;
@@ -137,6 +153,24 @@ if (spells.size < 1500 || spells.get(467) !== "Thorns" || spells.get(116) !== "F
 }
 
 const output = path.join(__dirname, "..", "SpellIndex.lua");
+// Class-specific skill lines identify spells whose ClassMask is zero. These are
+// client SkillLine IDs, not trainer levels or source data from another addon.
+const classSkills = {
+    WARRIOR: [26, 256, 257], PALADIN: [184, 267, 594], HUNTER: [50, 51, 163],
+    ROGUE: [38, 39, 253], PRIEST: [56, 78, 613, 2885], SHAMAN: [373, 374, 375],
+    MAGE: [6, 8, 237], WARLOCK: [354, 355, 593], DRUID: [134, 573, 574],
+};
+const classMasks = { WARRIOR: 1, PALADIN: 2, HUNTER: 4, ROGUE: 8, PRIEST: 16, SHAMAN: 64, MAGE: 128, WARLOCK: 256, DRUID: 1024 };
+const classLines = [];
+for (const [token, skillIDs] of Object.entries(classSkills)) {
+    const ids = new Set();
+    for (const { skill, spell, classMask } of abilities.rows.values()) {
+        if (!spells.has(spell) || skills.rows.get(skill)?.category !== 7 || !playerSkills.has(skill)) continue;
+        if (classMask ? (classMask & classMasks[token]) !== 0 : skillIDs.includes(skill)) ids.add(spell);
+    }
+    if (ids.size < 75) throw new Error(`Unexpectedly small ${token} spell catalog: ${ids.size}.`);
+    classLines.push(`    ${token} = { ${[...ids].sort((a, b) => a - b).join(", ")} },`);
+}
 const lines = [...spells].sort(([left], [right]) => left - right)
     .map(([id, name]) => `    [${id}] = ${JSON.stringify(name)},`);
 fs.writeFileSync(output, [
@@ -144,6 +178,11 @@ fs.writeFileSync(output, [
     "local _, addon = ...",
     "addon.playerSpells = {",
     ...lines,
+    "}",
+    "",
+    "-- Class associations from client SkillLineAbility masks and class skill lines.",
+    "addon.classSpells = {",
+    ...classLines,
     "}",
     "",
 ].join("\n"));

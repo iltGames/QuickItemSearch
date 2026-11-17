@@ -1,3 +1,9 @@
+## Quick Item Search 0.4.4
+
+- With What's Training enabled, search `warlock 12` or `warrior 10` for spells unlocked at that exact level. Results distinguish trainer spells from quest rewards, with quest sources on hover.
+- Browse any class with `spells warlock` or `warlock spell`. Class spell sections work without What's Training; enabling it adds known unlock levels and sources.
+- Close the search window with its top-right close button.
+
 ## Quick Item Search 0.4.3
 
 - Show a small note at the top of History explaining that only the last 10 searches are shown.

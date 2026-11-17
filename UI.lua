@@ -254,6 +254,7 @@ local function ShowHover(row)
         if entry.skillThresholds then
             GameTooltip:AddLine(FormatSkillThresholds(entry.profession, entry.skillThresholds))
         end
+        if addon.AppendSpellUnlockSources then addon.AppendSpellUnlockSources(GameTooltip, entry) end
         GameTooltip:Show()
         return
     end
@@ -781,7 +782,8 @@ local function CreateQueryPopup()
             local showFields = queries == queryExamples
             fields:SetShown(showFields)
             historySummary:SetShown(not showFields)
-            local fieldsOffset = showFields and fieldsHeight or 22
+            local summaryHeight = showFields and 0 or 22
+            local fieldsOffset = showFields and fieldsHeight or summaryHeight
             queryPopup.selected = 0
             queryPopup.count = #queries
             for index, row in ipairs(buttons) do
@@ -810,8 +812,8 @@ local function CreateQueryPopup()
         end)
     end
 
-    AddPopupButton("History", "Interface\\Icons\\INV_Misc_PocketWatch_01", -46, history)
-    AddPopupButton("Examples", "Interface\\Icons\\INV_Misc_Book_09", -16, queryExamples)
+    AddPopupButton("History", "Interface\\Icons\\INV_Misc_PocketWatch_01", -76, history)
+    AddPopupButton("Examples", "Interface\\Icons\\INV_Misc_Book_09", -46, queryExamples)
 end
 
 local function CreateWindow()
@@ -859,7 +861,7 @@ local function CreateWindow()
     searchBox = CreateFrame("EditBox", nil, frame, "SearchBoxTemplate")
     searchBox:SetHeight(34)
     searchBox:SetPoint("TOPLEFT", 24, -13)
-    searchBox:SetPoint("TOPRIGHT", -76, -13)
+    searchBox:SetPoint("TOPRIGHT", -106, -13)
     searchBox:SetFontObject("GameFontHighlightLarge")
     searchBox:SetTextColor(unpack(COLORS.text))
     searchBox:SetAltArrowKeyMode(false)
@@ -872,6 +874,10 @@ local function CreateWindow()
         if piece then piece:SetVertexColor(0.77, 0.69, 0.54) end
     end
     CreateQueryPopup()
+    local closeButton = CreateFrame("Button", "QuickItemSearchCloseButton", frame, "UIPanelCloseButton")
+    closeButton:SetSize(24, 24)
+    closeButton:SetPoint("TOPRIGHT", -16, -18)
+    closeButton:SetScript("OnClick", function() frame:Hide() end)
     searchBox:HookScript("OnTextChanged", function()
         queryPopup:Hide()
         ReleaseResultKeyboard()

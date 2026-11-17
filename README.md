@@ -22,6 +22,10 @@ Enter an action keyword by itself to browse its results. Try `spell`, `craft`, `
 
 Type `spell thorns`, `thorns spell`, or `spell 467` to search the English class and racial spell index, including spells you haven't learned. When a query is also a gear stat, such as `spell power`, use `spell:power` to look up a spell by name. Hover for the spell tooltip, click to inspect, or Shift-click to link the spell in open chat.
 
+With **What's Training** installed and enabled, type `warlock 12`, `warrior 10`, or `spell warrior 10` to see player spells unlocked at that exact level, including new ranks. Results show **Trainer** or **Quest**; hover quest spells for minimum levels, race restrictions, areas, and reward quest IDs. QuestieDB supplies quest names when available. Quest levels are minimum quest requirements, not a guarantee that the quest chain can be completed at that level. This requires a version of What's Training with the class catalog API. Unlock data is read from that addon at runtime and is never bundled or saved by Quick Item Search.
+
+Use `spells warlock`, `warlock spell`, or either word order with any of the nine classes to browse that class's full spell list in its own section. What's Training adds unlock levels and trainer or quest sources where it has data; hover for the same source details as level searches. Without What's Training, class browsing still shows spells from the client-generated index, without unlock levels or source details. Spells outside the provider's catalog remain visible in the full list.
+
 Search `@spell bite` for hunter pet ability ranks or `@spell bite 3` for a specific rank. Hover a **Hunter pet** result to see which beasts teach it, where to find them, their wild levels, and the pet level required to train it. Taming data comes from [Petopia Forever](https://www.wow-petopia.com/forever/abilities.php).
 
 Use `petspells` or `@petspells` to browse all hunter pet abilities. The singular forms `petspell` and `@petspell` work too. Add a name and optional rank to filter, such as `@petspell bite 3`.
