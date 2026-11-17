@@ -43,3 +43,11 @@ function addon.SearchPlayerSpells(name)
     end
     return results, #results > 0 and "Spells" or "No matching spells."
 end
+
+function addon.SearchPetSpells(name)
+    local results = {}
+    for _, entry in ipairs(addon.SearchPlayerSpells(name)) do
+        if entry.tameSources then results[#results + 1] = entry end
+    end
+    return results, #results > 0 and "Hunter pet spells" or "No matching hunter pet spells."
+end

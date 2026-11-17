@@ -266,8 +266,13 @@ function addon.Search(input)
     local query = input:match("^%s*(.-)%s*$")
     local lowerQuery = query:lower()
     if lowerQuery == "@target" then return addon.SearchTargetLoot() end
-    local shortcut, instanceQuery = lowerQuery:match("^(@%a+)%s+(.*)$")
+    local shortcut, instanceQuery = lowerQuery:match("^(@?%a+)%s+(.*)$")
     shortcut = shortcut or lowerQuery
+    local petShortcut = shortcut:gsub("^@", "")
+    if petShortcut == "petspell" or petShortcut == "petspells" then
+        local target = instanceQuery or ""
+        return addon.SearchPetSpells(target:match('^"(.*)"$') or target)
+    end
     if shortcut == "@spell" or shortcut == "@spells" then
         local target = instanceQuery or ""
         return addon.SearchPlayerSpells(target:match('^"(.*)"$') or target)

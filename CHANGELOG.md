@@ -1,3 +1,7 @@
+## Quick Item Search 0.4.2
+
+- Browse all hunter pet spell ranks with `petspells`, `@petspells`, `petspell`, or `@petspell`. Add a name and rank to narrow the results, such as `@petspell bite 3`.
+
 ## Quick Item Search 0.4.1
 
 - Search `@spell bite` for hunter pet abilities or `@spell bite 3` for a specific rank. Hover a result for the tameable beasts, their zones and wild levels, and the pet level required to train the ability.

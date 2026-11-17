@@ -24,6 +24,8 @@ Type `spell thorns`, `thorns spell`, or `spell 467` to search the English class 
 
 Search `@spell bite` for hunter pet ability ranks or `@spell bite 3` for a specific rank. Hover a **Hunter pet** result to see which beasts teach it, where to find them, their wild levels, and the pet level required to train it. Taming data comes from [Petopia Forever](https://www.wow-petopia.com/forever/abilities.php).
 
+Use `petspells` or `@petspells` to browse all hunter pet abilities. The singular forms `petspell` and `@petspell` work too. Add a name and optional rank to filter, such as `@petspell bite 3`.
+
 Type `craft arcanite transmute` to see the recipe's Alchemy skill thresholds. Search by recipe name, crafted item name, or recipe spell ID. The four numbers show the starting skill, yellow, green, and gray. A question mark indicates an unknown starting skill. Crafted item rows show their recipe's thresholds, and hovering an item with several recipes lists each recipe.
 
 Use `enchant gloves agil` or `gloves enchant agi` to find glove enchants that grant Agility. `enchant chest agil` also matches chest enchants that grant all primary stats.

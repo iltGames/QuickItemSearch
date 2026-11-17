@@ -71,6 +71,14 @@ assert(section("bite rank 3", "Spells")[1].name == "Bite (Rank 3)")
 local unknownRank = addon.Search("@spell lightning breath 1")
 assert(#unknownRank == 1 and #unknownRank[1].tameSources == 0, "Ranks with unknown sources stay searchable")
 assert(matches("@spell 467", 467).kind == "spell")
+for _, alias in ipairs({ "petspell", "petspells", "@petspell", "@petspells" }) do
+    local petRows = addon.Search(alias)
+    assert(#petRows == #addon.petSpells, alias .. " should list every pet spell rank")
+    for _, row in ipairs(petRows) do assert(row.tameSources, alias .. " should only list pet spells") end
+    local filtered = addon.Search(alias .. " bite rank 3")
+    assert(#filtered == 1 and filtered[1] == biteRank[1])
+    assert(#addon.Search(alias .. " 467") == 0)
+end
 local _, _, craftAnswer = matches("craft arcanite transmute", 17187)
 assert(craftAnswer == "Requires Alchemy 275.")
 matches("transmute arcan craft", 17187)
