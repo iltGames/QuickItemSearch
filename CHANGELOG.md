@@ -1,3 +1,7 @@
+## Quick Item Search 0.4.3
+
+- Show a small note at the top of History explaining that only the last 10 searches are shown.
+
 ## Quick Item Search 0.4.2
 
 - Browse all hunter pet spell ranks with `petspells`, `@petspells`, `petspell`, or `@petspell`. Add a name and rank to narrow the results, such as `@petspell bite 3`.

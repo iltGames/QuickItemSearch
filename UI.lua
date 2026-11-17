@@ -686,6 +686,11 @@ local function CreateQueryPopup()
     empty:SetPoint("TOPLEFT", 12, -13)
     empty:SetText("No recent searches")
 
+    local historySummary = queryPopup:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    historySummary:SetPoint("TOPLEFT", 12, -10)
+    historySummary:SetText("Only showing the last " .. HISTORY_LIMIT .. " searches")
+    historySummary:Hide()
+
     local fieldsHeight = 72
     local fields = CreateFrame("Frame", nil, queryPopup)
     fields:SetPoint("TOPLEFT", 0, 0)
@@ -775,7 +780,8 @@ local function CreateQueryPopup()
             HideHover()
             local showFields = queries == queryExamples
             fields:SetShown(showFields)
-            local fieldsOffset = showFields and fieldsHeight or 0
+            historySummary:SetShown(not showFields)
+            local fieldsOffset = showFields and fieldsHeight or 22
             queryPopup.selected = 0
             queryPopup.count = #queries
             for index, row in ipairs(buttons) do
@@ -792,6 +798,8 @@ local function CreateQueryPopup()
                 end
                 row:SetShown(query ~= nil)
             end
+            empty:ClearAllPoints()
+            empty:SetPoint("TOPLEFT", 12, -13 - fieldsOffset)
             empty:SetShown(#queries == 0)
             queryPopup:SetHeight(10 + fieldsOffset + math.max(1, #queries) * rowHeight)
             queryPopup.anchor = self
