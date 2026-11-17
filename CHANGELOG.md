@@ -1,3 +1,7 @@
+## Quick Item Search 0.4.7
+
+- Show which quests require an item in search result tooltips when QuestieDB is enabled.
+
 ## Quick Item Search 0.4.6
 
 - Add `upgrade` to show gear with a higher item level than the equipped piece it could replace. Results show the item level and the increase.

@@ -558,6 +558,79 @@ function addon.GetQuestRewardFilter(query)
     end
 end
 
+local indexedQuestDB, questRequirements
+
+local function StartQuestRequirementIndex()
+    local db = _G.LibQuestieDB
+    local questDB = db and db.Quest
+    if not questDB or questDB == indexedQuestDB or not questDB.GetAllIds or not questDB.Get
+        or not C_Timer or not C_Timer.After then return end
+
+    indexedQuestDB, questRequirements = questDB, nil
+    local ids, nextIndex
+    local requirements = {}
+
+    local function AddRequirement(itemID, questID)
+        if type(itemID) ~= "number" or itemID <= 0 then return end
+        local quests = requirements[itemID]
+        if not quests then
+            quests = {}
+            requirements[itemID] = quests
+        end
+        if quests[#quests] ~= questID then quests[#quests + 1] = questID end
+    end
+
+    local function Step()
+        if indexedQuestDB ~= questDB then return end
+        if not ids then
+            ids, nextIndex = questDB.GetAllIds(), 1
+            if type(ids) ~= "table" then return end
+        end
+        local lastIndex = math.min(nextIndex + 99, #ids)
+        for i = nextIndex, lastIndex do
+            local questID = ids[i]
+            local objectives = questDB.Get(questID, "objectives")
+            -- QuestieDB stores item objectives in the third objective group.
+            for _, objective in ipairs(objectives and objectives[3] or {}) do
+                AddRequirement(objective[1], questID)
+            end
+            for _, itemID in ipairs(questDB.Get(questID, "requiredSourceItems") or {}) do
+                AddRequirement(itemID, questID)
+            end
+        end
+        if lastIndex < #ids then
+            nextIndex = lastIndex + 1
+            C_Timer.After(0, Step)
+        else
+            questRequirements = requirements
+        end
+    end
+
+    C_Timer.After(0, Step)
+end
+
+StartQuestRequirementIndex()
+
+local function AppendQuestRequirements(tooltip, itemID)
+    StartQuestRequirementIndex()
+    local db = _G.LibQuestieDB
+    if not db or db.Quest ~= indexedQuestDB or not questRequirements then return end
+
+    local added = 0
+    for _, questID in ipairs(questRequirements[itemID] or {}) do
+        local name = Clean(db.Quest.Get(questID, "name"))
+        if name and name ~= "" then
+            if added == 6 then
+                tooltip:AddLine("Additional quest requirements omitted.", 0.71, 0.66, 0.57, true)
+                break
+            end
+            if added == 0 then tooltip:AddLine(" ") end
+            tooltip:AddLine("Required for: " .. (name:gsub("|", "||")), 1, 0.82, 0, true)
+            added = added + 1
+        end
+    end
+end
+
 local LABELS = { drop = "Drops from", object = "Found in", container = "Found in", vendor = "Sold by", quest = "Quest reward" }
 
 local function AtlasLineAlreadyShown(tooltip, source)
@@ -581,7 +654,7 @@ function addon.AppendItemSources(tooltip, itemID)
         if not AtlasLineAlreadyShown(tooltip, source) then
             if added == 6 then
                 tooltip:AddLine("Additional sources omitted.", 0.71, 0.66, 0.57, true)
-                return
+                break
             end
             if added == 0 then
                 tooltip:AddLine(" ")
@@ -594,4 +667,5 @@ function addon.AppendItemSources(tooltip, itemID)
             added = added + 1
         end
     end
+    AppendQuestRequirements(tooltip, itemID)
 end
