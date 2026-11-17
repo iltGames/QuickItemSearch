@@ -12,6 +12,7 @@ PtrItemIndex.lua
 GearIndex.lua
 CraftedIndex.lua
 SpellIndex.lua
+PetSpellIndex.lua
 RecipeIndex.lua
 GearSearch.lua
 Questions.lua

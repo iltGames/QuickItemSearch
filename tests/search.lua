@@ -12,7 +12,7 @@ local addon = {
         { 503, "Kelp Oil", "Alchemy", 110, false, { 3821 } } },
 }
 
-for _, file in ipairs({ "GearSearch", "Questions", "Search", "SpellSearch", "EmoteSearch", "RecipeSearch", "Sources" }) do
+for _, file in ipairs({ "GearSearch", "Questions", "Search", "PetSpellIndex", "SpellSearch", "EmoteSearch", "RecipeSearch", "Sources" }) do
     assert(loadfile(file .. ".lua"))("QuickItemSearch", addon)
 end
 
@@ -56,9 +56,21 @@ matches("thorns spell", 467)
 matches("spell 467", 467)
 matches("spell power", 1)
 matches("spell:power", 468, 470)
-matches("spell mine", 469)
+local mineSpells = addon.Search("spell mine")
+assert(mineSpells[1].id == 469 and mineSpells[1].kind == "spell")
+assert(mineSpells[2].name == "Mine! (Rank 1)" and mineSpells[2].tameSources)
 matches("power spell word: shield", 470)
 matches('spell "power word: shield"', 470)
+local biteRanks = addon.Search("@spell bite")
+assert(#biteRanks == 8 and biteRanks[1].name == "Bite (Rank 1)", "Bite should show all eight ranks")
+local biteRank = addon.Search("@spell bite 3")
+assert(#biteRank == 1 and biteRank[1].name == "Bite (Rank 3)")
+local source = biteRank[1].tameSources[1]
+assert(source[1] == "Deepmoss Creeper" and source[2] == "Stonetalon Mountains" and source[3] == "16-17")
+assert(section("bite rank 3", "Spells")[1].name == "Bite (Rank 3)")
+local unknownRank = addon.Search("@spell lightning breath 1")
+assert(#unknownRank == 1 and #unknownRank[1].tameSources == 0, "Ranks with unknown sources stay searchable")
+assert(matches("@spell 467", 467).kind == "spell")
 local _, _, craftAnswer = matches("craft arcanite transmute", 17187)
 assert(craftAnswer == "Requires Alchemy 275.")
 matches("transmute arcan craft", 17187)
@@ -124,7 +136,7 @@ addon.index[702] = "Spellstone"
 addon.sortedEntries = nil
 local spellItems, _, _, _, spellSections = addon.Search("spell")
 assert(#spellItems == 1 and spellItems[1].id == 702 and spellSections.title == "Items")
-assert(spellSections[1].title == "Spells" and #spellSections[1].rows == 4)
+assert(spellSections[1].title == "Spells" and #spellSections[1].rows == 4 + #addon.petSpells)
 for _, alias in ipairs({ "craft", "make" }) do
     local recipes, _, _, _, sections = addon.Search(alias)
     assert(#recipes == 5 and sections.title == "Recipes", alias)

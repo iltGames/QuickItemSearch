@@ -265,6 +265,12 @@ end
 function addon.Search(input)
     local query = input:match("^%s*(.-)%s*$")
     local lowerQuery = query:lower()
+    local shortcut, instanceQuery = lowerQuery:match("^(@%a+)%s+(.*)$")
+    shortcut = shortcut or lowerQuery
+    if shortcut == "@spell" or shortcut == "@spells" then
+        local target = instanceQuery or ""
+        return addon.SearchPlayerSpells(target:match('^"(.*)"$') or target)
+    end
     local id = ParseID(query)
     if id then
         if addon.IsPTRItem(id) then return {}, "This item is marked PTR Only." end

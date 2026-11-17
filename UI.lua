@@ -90,7 +90,8 @@ local function UpdateRow(row)
         end
     end
     if entry.kind == "text" then
-        icon = "Interface\\Icons\\INV_Scroll_03"
+        icon = entry.tameSources and "Interface\\Icons\\Ability_Hunter_BeastTaming"
+            or "Interface\\Icons\\INV_Scroll_03"
     elseif entry.kind == "emote" then
         icon = "Interface\\ChatFrame\\UI-ChatIcon-Chat-Up"
     elseif entry.kind == "spell" then
@@ -196,6 +197,15 @@ local function ShowHover(row)
         GameTooltip:AddLine((entry.name:gsub("|", "||")), 1, 1, 1, true)
         if entry.kind == "emote" then
             GameTooltip:AddLine("Click to perform this emote.", 0.8, 0.8, 0.8)
+        elseif entry.tameSources then
+            GameTooltip:AddLine(("Requires pet level %d to train."):format(entry.petTrainingLevel), 0.8, 0.8, 0.8)
+            local instructions = #entry.tameSources > 0 and "Tame one of these beasts and have it use the ability."
+                or "No known tame source for this rank."
+            GameTooltip:AddLine(instructions, 1, 0.82, 0, true)
+            for _, source in ipairs(entry.tameSources) do
+                local beast, zone, level = unpack(source)
+                GameTooltip:AddLine(("%s - %s (Level %s)"):format(beast, zone, level), 1, 1, 1, true)
+            end
         elseif entry.description then
             GameTooltip:AddLine((entry.description:gsub("|", "||")), 0.8, 0.8, 0.8, true)
         end

@@ -1,6 +1,7 @@
 local function Noop() end
 
 local resizeHandle
+local buttons = {}
 local methods = {}
 function methods:SetScript(name, callback) self.scripts[name] = callback end
 function methods:Show() self.shown = true end
@@ -36,7 +37,10 @@ function methods:GetName() return self.name end
 function CreateFrame(kind, name)
     local frame = Widget()
     if name then _G[name], frame.name = frame, name end
-    if kind == "Button" then resizeHandle = frame end
+    if kind == "Button" then
+        resizeHandle = frame
+        buttons[#buttons + 1] = frame
+    end
     if kind == "EditBox" then
         frame.Instructions, frame.Left, frame.Middle, frame.Right = Widget(), Widget(), Widget(), Widget()
     end
@@ -44,6 +48,9 @@ function CreateFrame(kind, name)
 end
 
 UIParent = Widget()
+GameTooltip = Widget()
+function GameTooltip:SetOwner(owner) self.owner = owner end
+function GameTooltip:IsOwned(owner) return self.owner == owner end
 UIParent:SetSize(1200, 900)
 SlashCmdList = {}
 UISpecialFrames = {}
@@ -94,4 +101,20 @@ ExpectHeight(101, "empty query after releasing resize handle")
 assert(QuickItemSearchSettings.rows == 12, "vertical drag must save the new cap")
 toggle("50")
 ExpectHeight(443, "fifty matches at twelve-row cap")
+local tooltipLines = {}
+function GameTooltip:AddLine(line) tooltipLines[#tooltipLines + 1] = line end
+function addon.Search()
+    return { {
+        kind = "text",
+        name = "Bite (Rank 3)",
+        petTrainingLevel = 16,
+        tameSources = { { "Deepmoss Creeper", "Stonetalon Mountains", "16-17" } },
+    } }
+end
+toggle("@spell bite 3")
+for _, button in ipairs(buttons) do
+    if button.entry and button.entry.tameSources then button.scripts.OnEnter(button) end
+end
+assert(GameTooltip:IsShown() and tooltipLines[2] == "Requires pet level 16 to train.")
+assert(tooltipLines[4] == "Deepmoss Creeper - Stonetalon Mountains (Level 16-17)")
 print("Window sizing regression passed")

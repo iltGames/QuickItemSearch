@@ -16,6 +16,8 @@ Enter an action keyword by itself to browse its results. Try `spell`, `craft`, `
 
 Type `spell thorns`, `thorns spell`, or `spell 467` to search the English class and racial spell index, including spells you haven't learned. When a query is also a gear stat, such as `spell power`, use `spell:power` to look up a spell by name. Hover for the spell tooltip, click to inspect, or Shift-click to link the spell in open chat.
 
+Search `@spell bite` for hunter pet ability ranks or `@spell bite 3` for a specific rank. Hover a **Hunter pet** result to see which beasts teach it, where to find them, their wild levels, and the pet level required to train it. Taming data comes from [Petopia Forever](https://www.wow-petopia.com/forever/abilities.php).
+
 Type `craft arcanite transmute` to see the recipe's Alchemy skill thresholds. Search by recipe name, crafted item name, or recipe spell ID. The four numbers show the starting skill, yellow, green, and gray. A question mark indicates an unknown starting skill. Crafted item rows show their recipe's thresholds, and hovering an item with several recipes lists each recipe.
 
 Use `enchant gloves agil` or `gloves enchant agi` to find glove enchants that grant Agility. `enchant chest agil` also matches chest enchants that grant all primary stats.
