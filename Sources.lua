@@ -625,7 +625,7 @@ local function AppendQuestRequirements(tooltip, itemID)
                 break
             end
             if added == 0 then tooltip:AddLine(" ") end
-            tooltip:AddLine("Required for: " .. (name:gsub("|", "||")), 1, 0.82, 0, true)
+            tooltip:AddLine("Required for quest: " .. (name:gsub("|", "||")), 1, 0.82, 0, true)
             added = added + 1
         end
     end

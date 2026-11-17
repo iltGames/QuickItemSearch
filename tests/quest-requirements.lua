@@ -28,8 +28,8 @@ local function TooltipLines(itemID)
 end
 
 local tooltip = TooltipLines(11)
-assert(tooltip:find("Required for: Collect Supplies", 1, true), "Item objectives must appear in the tooltip")
-assert(tooltip:find("Required for: Use Supplies", 1, true), "Required quest items must appear in the tooltip")
+assert(tooltip:find("Required for quest: Collect Supplies", 1, true), "Item objectives must appear in the tooltip")
+assert(tooltip:find("Required for quest: Use Supplies", 1, true), "Required quest items must appear in the tooltip")
 assert(tooltip:find("Quest reward: Earn Supplies", 1, true), "Quest rewards must retain their own label")
 assert(not tooltip:find("Deliver a Message", 1, true), "NPC objectives must not match item IDs")
 local _, count = tooltip:gsub("Collect Supplies", "")
