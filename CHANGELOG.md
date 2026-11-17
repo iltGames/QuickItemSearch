@@ -1,3 +1,9 @@
+## Quick Item Search 0.4.5
+
+- Use `@d`, `@dung`, or `@inst` for dungeon loot, `@t` for target loot, and `@gear` for your character's gear.
+- Chain stat filters in a single gear search. For example, `@me chest stam sp` requires both Stamina and Spell Power. Use `def` for Defense.
+- Browse `@me` results by equipment slot. Each slot lists plate first, followed by mail, leather, and cloth.
+
 ## Quick Item Search 0.4.4
 
 - With What's Training enabled, search `warlock 12` or `warrior 10` for spells unlocked at that exact level. Results distinguish trainer spells from quest rewards, with quest sources on hover.

@@ -65,6 +65,7 @@ local x, y = 100, 800
 GetCursorPosition = function() return x, y end
 QuickItemSearchSettings = {rows = 20}
 local addon = {}
+assert(loadfile("Search.lua"))("QuickItemSearch", addon)
 local lastQuery
 function addon.Search(query)
     lastQuery = query
@@ -150,6 +151,14 @@ assert(searchBox:GetText() == "@dungeon brd")
 ClickButton("Examples")
 ClickButton("Dungeon")
 assert(searchBox:GetText() == "@dungeon brd", "clicking a shortcut twice must not duplicate it")
+searchBox:SetText("@D brd")
+ClickButton("Examples")
+ClickButton("Dungeon")
+assert(searchBox:GetText() == "@dungeon brd", "the Dungeon button must replace an alias")
+searchBox:SetText(" @T ")
+lastQuery = nil
+QuickItemSearchFrame.scripts.OnEvent(QuickItemSearchFrame, "PLAYER_TARGET_CHANGED")
+assert(lastQuery and lastQuery:match("@T"), "target changes must refresh the target alias")
 ClickButton("Examples")
 for _, button in ipairs(buttons) do
     assert(button.text ~= "Quest" and button.query ~= 'quest:"Test of Lore"')

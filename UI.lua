@@ -724,9 +724,8 @@ local function CreateQueryPopup()
                 return
             end
             local current = searchBox:GetText():match("^%s*(.-)%s*$")
-            local existing, rest = current:match("^(@%a+)%s*(.*)$")
-            existing = existing and existing:lower()
-            if existing == "@target" or existing == "@me" or existing == "@dungeon" or existing == "@instance" then
+            local existing, rest = current:match("^(%S+)%s*(.*)$")
+            if addon.GetSearchShortcut(existing) then
                 current = rest
             end
             FillQuery(token .. " " .. current)
@@ -1062,7 +1061,8 @@ local function CreateWindow()
         if event == "PLAYER_REGEN_DISABLED" then
             ReleaseResultKeyboard()
         elseif event == "PLAYER_TARGET_CHANGED" then
-            if self:IsShown() and searchBox:GetText():lower():match("^%s*@target%s*$") then SearchNow() end
+            local query = searchBox:GetText():match("^%s*(.-)%s*$")
+            if self:IsShown() and addon.GetSearchShortcut(query) == "@target" then SearchNow() end
         else
             OnItemData(self, event, ...)
         end
