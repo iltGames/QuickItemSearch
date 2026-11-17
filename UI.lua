@@ -51,6 +51,8 @@ local visibleRows = DEFAULT_ROWS
 local resizing, resizePreviewRows
 local arrowSelected, resultKeyboardActive, pressedResultEnter
 local heldArrow, arrowTimer
+local SEARCH_KEYS = "Up / Down   Navigate     Enter   Release Focus     Esc   Close"
+local RESULT_KEYS = "Up / Down   Navigate     Enter   Activate     Esc   Close"
 local rows, results = {}, {}
 local primaryResults, resultSections
 local expandedSections
@@ -320,6 +322,9 @@ local function ReleaseResultKeyboard()
     if resultKeyboardActive then
         frame:EnableKeyboard(false)
     end
+    if resultKeyboardActive or arrowSelected then
+        keyboardHint:SetText(SEARCH_KEYS)
+    end
     arrowSelected, resultKeyboardActive, pressedResultEnter = nil, nil, nil
 end
 
@@ -526,6 +531,9 @@ local function MoveSelection(delta)
     end
     if not results[nextSelection] then return end
     local actionable = not not CanActivate(results[nextSelection])
+    if not resultKeyboardActive and actionable ~= arrowSelected then
+        keyboardHint:SetText(actionable and RESULT_KEYS or SEARCH_KEYS)
+    end
     arrowSelected = actionable
     if nextSelection == selected then return end
     selected = nextSelection
@@ -909,6 +917,7 @@ local function CreateWindow()
             resultKeyboardActive = true
             frame:SetPropagateKeyboardInput(true)
             frame:EnableKeyboard(true)
+            keyboardHint:SetText(RESULT_KEYS)
         end
         SelectResult(entry)
     end)
@@ -986,6 +995,13 @@ local function CreateWindow()
     range = frame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     range:SetPoint("BOTTOMLEFT", 14, 12)
     range:SetTextColor(unpack(COLORS.mutedText))
+    keyboardHint = frame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    keyboardHint:SetPoint("BOTTOMRIGHT", -23, 12)
+    keyboardHint:SetPoint("LEFT", range, "RIGHT", 8, 0)
+    keyboardHint:SetJustifyH("RIGHT")
+    keyboardHint:SetWordWrap(false)
+    keyboardHint:SetText(SEARCH_KEYS)
+    keyboardHint:SetTextColor(unpack(COLORS.mutedText))
     local dragHandle = CreateFrame("Frame", nil, frame)
     dragHandle:SetPoint("TOPLEFT", 8, -1)
     dragHandle:SetPoint("TOPRIGHT", -8, -1)
