@@ -355,6 +355,7 @@ matches("rare boss loot", 1)
 matches('boss:"Test Boss" rare', 1)
 matches('2h rare boss:"Test Boss"', 1)
 matches("rare boss:test", 1)
+assert(matches("boss:test sp", 1).matchLabel == "+5 Spell Power")
 matches("rare boss:trash")
 matches("boss:Test Boss", 1, 4)
 atlas = instanceAtlas
@@ -417,6 +418,10 @@ local _, instanceHint = matches("@dungeon empty")
 assert(instanceHint == "No matching loot for Empty Keep.")
 GetInstanceInfo = function() return "Krol'dok Stronghold", "party" end
 matches("@dungeon", 1)
+for _, alias in ipairs({ "@d", "@dung", "@inst" }) do
+    matches(alias, 1)
+    matches(alias:upper() .. "   brd", 2)
+end
 GetInstanceInfo = function() return "Riverglades", "none" end
 _, instanceHint = matches("@instance")
 assert(instanceHint:find("Enter a dungeon name", 1, true))
@@ -432,6 +437,7 @@ _, targetHint = matches("@target")
 assert(targetHint == "Select an NPC to look up its drops.")
 targetGUID = "Creature-0-1-2-3-1235-0000123456"
 matches(" @TARGET ", 1, 4)
+matches(" @T ", 1, 4)
 targetGUID = "Creature-0-1-2-3-9876-0000123456"
 matches("@target")
 targetGUID = "Creature-0-1-2-3-1234-0000123456"
@@ -599,6 +605,71 @@ matches("@me wep", 20003, 20001, 20007, 20002)
 matches("@me weapons", 20003, 20001, 20007, 20002)
 matches("@me 1h wep", 20007)
 matches("@me 2h weps", 20003, 20001, 20002)
+
+addon.gear[20004][3], addon.gear[20005][3] = 48, 48
+addon.index[20008], addon.index[20009], addon.index[20010] = "Test Stam Chest", "Test SP Chest", "Test Leather Chest"
+addon.gear[20008], addon.gear[20009], addon.gear[20010] = { 5, 20, 16, 3, 1 }, { 5, 20, 32, 3, 1 }, { 5, 20, 48, 3, 1 }
+types[20008], types[20009], types[20010] = { 4, 1 }, { 4, 1 }, { 4, 2 }
+local statValues = {
+    [20004] = { ITEM_MOD_STAMINA_SHORT = 10, ITEM_MOD_SPELL_POWER_SHORT = 20 },
+    [20005] = { ITEM_MOD_STAMINA_SHORT = 12, ITEM_MOD_SPELL_POWER_SHORT = 25 },
+    [20008] = { ITEM_MOD_STAMINA_SHORT = 12 },
+    [20009] = { ITEM_MOD_SPELL_POWER_SHORT = 25 },
+    [20010] = { ITEM_MOD_STAMINA_SHORT = 12, ITEM_MOD_SPELL_POWER_SHORT = 25 },
+}
+C_Item.GetItemStats = function(link) return statValues[tonumber(link:match("%d+"))] end
+local chained, chainedHint = matches("@me chest stam sp", 20005)
+assert(chained.matchLabel == "+12 Stamina · +25 Spell Power")
+assert(chainedHint:find("Stamina · Spell Power", 1, true))
+matches("@gear chest spell power with stamina", 20005)
+matches("chest stam sp", 20004, 20010, 20005)
+matches("chest stam near 10 with spell power around 21", 20004, 20010, 20005)
+matches("chest stam near 10 sp near 24", 20010, 20005, 20004)
+matches("chest stam near 10 sp near 18", 20004)
+local _, badAmount = matches("@me chest stamina sp near 0")
+assert(badAmount == "Enter a positive stat amount.")
+matches("@me chest stamina healing power", 20005)
+
+local cached, queued, loads = false, nil, 0
+GetTime = function() return 0 end
+C_Item.IsItemDataCachedByID = function(id) return id ~= 20005 or cached end
+C_Item.RequestLoadItemDataByID = function(id)
+    assert(id == 20005)
+    cached, loads = true, loads + 1
+end
+C_Timer = { NewTimer = function(_, callback)
+    queued = callback
+    return { Cancel = function() queued = nil end }
+end }
+local pending, _, loadChained = addon.Search("@me chest stam sp")
+assert(#pending == 0 and loadChained, "Chained stats must wait for uncached gear")
+local loaded, loadedSections
+loadChained(function(rows, _, _, _, sections) loaded, loadedSections = rows, sections end)
+while queued do
+    local step = queued
+    queued = nil
+    step()
+end
+assert(loads == 1 and #loaded == 1 and loaded[1].matchLabel == chained.matchLabel)
+assert(loadedSections and loadedSections.title == "Chest", "Loaded stats must retain the slot heading")
+
+addon.index[20011], addon.index[20012], addon.index[20013] = "Test Helm", "Test Plate Robe", "Test Leggings"
+addon.gear[20011], addon.gear[20012], addon.gear[20013] = { 1, 20, 0, 3, 1 }, { 20, 22, 4112, 3, 1 }, { 7, 20, 0, 3, 1 }
+types[20011], types[20012], types[20013] = { 4, 1 }, { 4, 4 }, { 4, 2 }
+statValues[20012] = { ITEM_MOD_STAMINA_SHORT = 14, ITEM_MOD_DEFENSE_SKILL_RATING_SHORT = 8 }
+learned[293], learned[414] = 1, 1
+assert(addon.SetLevelWindow(6, 2))
+local firstSlot, _, _, _, gearSections = addon.Search("@me")
+assert(gearSections and gearSections.title == "Head" and #firstSlot == 1 and firstSlot[1].id == 20011)
+assert(gearSections[1].title == "Chest" and gearSections[2].title == "Legs")
+local chest = gearSections[1].rows
+assert(#chest == 6 and chest[1].id == 20012 and chest[2].id == 20005 and chest[3].id == 20010,
+    "Armor type must take priority over required level, and robes belong in Chest")
+matches("@me chest", 20012, 20005, 20010, 20009, 20008, 20004)
+matches("@me helm", 20011)
+matches("@me legs", 20013)
+matches("@me chest stam near 12", 20012, 20005, 20010, 20008, 20004)
+assert(matches("@me chest stam def", 20012).matchLabel == "+14 Stamina · +8 Defense")
 C_SkillInfo = nil
 local _, playerHint = matches("my gear rings")
 assert(playerHint == "Character proficiencies are unavailable.")

@@ -10,9 +10,9 @@ Search by English item name, numeric ID, or pasted item link. Use Up and Down to
 
 With AtlasLoot Classic Forever enabled, search for a boss by name to see its loot. Use `boss:<name>` to prioritize the boss's loot. Items marked **PTR Only** in the bundled client data are filtered out.
 
-Target an NPC and type `@target` to see its indexed drops from AtlasLoot and QuestieDB. The results update when you switch targets while that query is open.
+Target an NPC and type `@target` or `@t` to see its indexed drops from AtlasLoot and QuestieDB. The results update when you switch targets while that query is open.
 
-Use `@dungeon krol'dok` or `@instance Blackrock Depths` to see loot from AtlasLoot and Forever Dungeon Journal. Drops are grouped by boss, with a separate Trash section when available. The summary shows the instance level range and boss headings show levels when known. Results show rare-or-better items and uncommon-or-better recipes. You can use part of the name or common abbreviations such as `hot` for Hall of Thanes and `brd` for Blackrock Depths. `dm` includes both Deadmines and Dire Maul. With no name, either shortcut looks up the dungeon or raid you are currently inside.
+Use `@dungeon`, `@instance`, `@d`, `@dung`, or `@inst` to see loot from AtlasLoot and Forever Dungeon Journal. Type a full or partial name, or a common abbreviation such as `@d hot` for Hall of Thanes or `@inst brd` for Blackrock Depths. `dm` includes both Deadmines and Dire Maul. Omit the name to look up your current dungeon or raid. Drops are grouped by boss, with a separate Trash section when available. The summary shows the instance level range and boss headings show levels when known. Results show rare-or-better items and uncommon-or-better recipes.
 
 Search keywords such as `spell`, `craft`, `gather`, and `train` can go before, after, or between the words of the search. Try `arcanite craft transmute`, `rich mine thorium vein`, or `where can I first train aid 225?`. Use quotes around names that contain a keyword.
 
@@ -60,9 +60,9 @@ Put `train` before or after the profession. Try `bs train`, `bs train 225`, or `
 
 Use `wep`, `weps`, `weapon`, or `weapons` for both one-handed and two-handed melee weapons. Add `1h` or `2h` to narrow the search, or use `@me wep` to apply your character's level and proficiencies.
 
-Try `@me` or `my gear` to find gear around your character's current level. The search uses your configured level offsets and learned armor and weapon proficiencies. Narrow it with the same gear filters, such as `@me chest`, `@me 1h`, or `my gear rings with stamina`. Check item tooltips for individual requirements such as class, faction, or reputation.
+Try `@me`, `@gear`, or `my gear` to find gear around your character's current level. The search uses your configured level offsets and learned armor and weapon proficiencies. Results are grouped by equipment slot, with plate, mail, leather, then cloth within each slot. Type a slot to show only that section, such as `@me helm`, `@me chest`, or `@me legs`. Check item tooltips for individual requirements such as class, faction, or reputation.
 
-Use the same search box to combine equipment slots, character levels, and item stats.
+Use the same search box to combine equipment slots, character levels, and item stats. Space-separated stats must all be present. Add `near` or `around` after a stat to filter its amount. When you specify several amounts, results are ranked by the sum of their differences from those amounts, within each armor type for character gear.
 
 | Query | Matches |
 | --- | --- |
@@ -70,6 +70,8 @@ Use the same search box to combine equipment slots, character levels, and item s
 | `rings for lvl 20` | Rings that require level 15–22 with the default range. |
 | `rings from 10-12 with agility` | Rings in that level range with positive Agility. |
 | `rings with agility around 20` | Rings with +16 to +24 Agility, closest to +20 first. |
+| `@me chest stam sp` | Chest gear for your character with both Stamina and Spell Power. |
+| `chest stamina near 10 spell power near 20` | Chest gear close to both +10 Stamina and +20 Spell Power. |
 | `lvl 10 boss drop agil` | Gear that requires level 5–12 with the default range, grants Agility, and drops from a boss in AtlasLoot Classic Forever. |
 | `rare boss:"Edwin VanCleef"` | Rare gear from a named boss in AtlasLoot Classic Forever. |
 | `2h quest` | Two-handed weapons awarded by quests in QuestieDB or the local source backup. |
@@ -94,7 +96,7 @@ Use `boe` or `bind on equip` for Bind on Equip gear and `bop` or `bind on pickup
 
 Use `boss`, `boss loot`, or `quest` before or after other filters. Add a name with `boss:<name>` or `quest:<title>`. Put quotes around quest titles and boss names with spaces when using gear filters, as shown above. Quest IDs work too, as in `quest:123 rare`. A standalone `boss:<name>` shows the boss's full loot table and accepts an unquoted name.
 
-Primary stats accept `agi` or `agil`, `str`, `int`, `spi`, and `sta` or `stam`. Secondary filters include `spell power` (`sp`), `spell damage` (`spell dmg`), `healing power` (`hp`, `healing`), `hit`, `crit`, `haste`, `expertise`, `defense`, `dodge`, `parry`, `block`, `block value`, `attack power` (`ap`), `ranged attack power` (`rap`), `mp5`, `health regen`, `spell pen`, `armor pen`, `resilience`, `bonus armor`, and school resistances such as `fire res`.
+Primary stats accept `agi` or `agil`, `str`, `int`, `spi`, and `sta` or `stam`. Secondary filters include `spell power` (`sp`), `spell damage` (`spell dmg`), `healing power` (`hp`, `healing`), `hit`, `crit`, `haste`, `expertise`, `defense` (`def`), `dodge`, `parry`, `block`, `block value`, `attack power` (`ap`), `ranged attack power` (`rap`), `mp5`, `health regen`, `spell pen`, `armor pen`, `resilience`, `bonus armor`, and school resistances such as `fire res`.
 
 `Around`, `near`, and `about` allow a 20% difference rounded down, with a minimum of two points. The index comes from the Forever client and its hotfixes. The game supplies stat amounts as item data loads. Filters use the indexed item stats. Separate equip effects, procs, and on-use abilities can appear in the tooltip outside that index.
 

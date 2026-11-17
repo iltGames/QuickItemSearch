@@ -73,10 +73,11 @@ local armorSkills = {
 }
 
 local function PlayerProficiencyFilter(getSkill)
-    local learned = {}
-    return function(id)
+    local learned, armorRanks = {}, {}
+    local function MatchesProficiency(id)
         local _, _, _, _, _, classID, subclassID = C_Item.GetItemInfoInstant(id)
         if classID == ARMOR_CLASS and (subclassID == 0 or subclassID == 1) then
+            armorRanks[id] = subclassID
             return true -- Miscellaneous armor and cloth.
         end
         local skillID = classID == WEAPON_CLASS and weaponSkills[subclassID]
@@ -86,8 +87,12 @@ local function PlayerProficiencyFilter(getSkill)
             local skill = getSkill(skillID)
             learned[skillID] = skill and (skill.rank or 0) > 0 or false
         end
+        if learned[skillID] then
+            armorRanks[id] = classID == ARMOR_CLASS and subclassID <= 4 and subclassID or 0
+        end
         return learned[skillID]
     end
+    return MatchesProficiency, armorRanks
 end
 
 local oneHanded = { label = "One-handed weapons", [13] = true, [21] = true, [22] = true }
@@ -98,6 +103,47 @@ local weaponSlots = {
     ["1h"] = oneHanded, ["one-handed"] = oneHanded, onehanded = oneHanded, ["one handed"] = oneHanded,
     ["2h"] = twoHanded, ["two-handed"] = twoHanded, twohanded = twoHanded, ["two handed"] = twoHanded,
 }
+
+local otherGear = { label = "Other gear" }
+local browseSlots = {
+    slots.head, slots.neck, slots.shoulders, slots.cloak, slots.chest, slots.wrists,
+    slots.hands, slots.waist, slots.legs, slots.feet, slots.ring, slots.trinket,
+    meleeWeapons, slots.shield, { label = "Held in off hand", [23] = true },
+    { label = "Ranged weapons", [15] = true, [25] = true, [26] = true },
+    { label = "Relic", [28] = true }, { label = "Shirt", [4] = true },
+    { label = "Tabard", [19] = true }, otherGear,
+}
+local browseSlotByType = {}
+for _, slot in ipairs(browseSlots) do
+    for inventoryType in pairs(slot) do
+        if type(inventoryType) == "number" then browseSlotByType[inventoryType] = slot end
+    end
+end
+
+local function GroupPlayerGear(results, slot, hint)
+    if #results == 0 then return results, hint end
+    if slot then return results, hint, nil, nil, { title = slot.label } end
+
+    local slotRows = {}
+    for _, row in ipairs(results) do
+        local group = browseSlotByType[addon.gear[row.id][1]] or otherGear
+        local rows = slotRows[group] or {}
+        rows[#rows + 1] = row
+        slotRows[group] = rows
+    end
+    local firstRows, sections = nil, {}
+    for _, group in ipairs(browseSlots) do
+        local rows = slotRows[group]
+        if rows then
+            if not firstRows then
+                firstRows, sections.title = rows, group.label
+            else
+                sections[#sections + 1] = { title = group.label, rows = rows }
+            end
+        end
+    end
+    return firstRows, hint, nil, nil, sections
+end
 
 local rarities = {
     poor = { "Poor", 0 }, common = { "Common", 1 }, uncommon = { "Uncommon", 2 },
@@ -157,7 +203,7 @@ stats["crit rating"], stats["critical strike"], stats["critical strike rating"] 
 stats["haste rating"], stats["defense rating"], stats["block rating"] = stats.haste, stats.defense, stats.block
 stats["crit chance"], stats["critical strike chance"] = stats.crit, stats.crit
 stats["dodge rating"], stats["parry rating"], stats["expertise rating"] = stats.dodge, stats.parry, stats.expertise
-stats.defence, stats["defence rating"] = stats.defense, stats.defense
+stats.def, stats.defence, stats["defence rating"] = stats.defense, stats.defense, stats.defense
 stats.ap, stats.rap, stats["mana regen"] = stats["attack power"], stats["ranged attack power"], stats.mp5
 stats["mana regeneration"], stats["health regeneration"] = stats.mp5, stats["health regen"]
 stats["spell pen"], stats["armor pen"] = stats["spell penetration"], stats["armor penetration"]
@@ -238,11 +284,13 @@ local function ParseGearQuery(query)
                     filters.binding, query = binding, bindingTail or rest
                 else
                     local stat, statTail = MatchStat(query)
-                    if not stat or filters.stat then return end
-                    filters.stat = stat
+                    if not stat then return end
+                    local filter = { stat = stat }
+                    filters.stats = filters.stats or {}
+                    filters.stats[#filters.stats + 1] = filter
                     local modifier, amount, amountTail = statTail:match("^%s+(%a+)%s+%+?(%d+)(.*)$")
                     if approximate[modifier] then
-                        filters.near, query = tonumber(amount), amountTail
+                        filter.near, query = tonumber(amount), amountTail
                     else
                         query = statTail
                     end
@@ -253,7 +301,7 @@ local function ParseGearQuery(query)
         query = query:match("^%s*(.*)$")
     end
     if filters.slot or filters.armorType or filters.level or filters.maxLevel or filters.boss or filters.quest or filters.crafted
-        or filters.rarity or filters.binding or filters.stat then return filters end
+        or filters.rarity or filters.binding or filters.stats then return filters end
 end
 
 local function HasStat(flags, stat)
@@ -328,8 +376,8 @@ local function Describe(filters)
     end
     if filters.crafted then parts[#parts + 1] = "Crafted gear" end
     if filters.profession then parts[#parts + 1] = filters.profession end
-    if filters.stat then
-        parts[#parts + 1] = filters.stat[1] .. (filters.near and (" near +" .. filters.near) or "")
+    for _, filter in ipairs(filters.stats or {}) do
+        parts[#parts + 1] = filter.stat[1] .. (filter.near and (" near +" .. filter.near) or "")
     end
     return table.concat(parts, " · ")
 end
@@ -339,10 +387,10 @@ function addon.SearchGear(query, requireCombinedBoss, craftedOnly, profession, p
     if not filters and playerGear then return {}, "Try my gear chest, my gear rings, or my gear 1h." end
     if not filters then return end
     if requireCombinedBoss and not (filters.slot or filters.armorType or filters.level or filters.maxLevel or filters.quest
-        or filters.crafted or filters.rarity or filters.binding or filters.stat) then return end
+        or filters.crafted or filters.rarity or filters.binding or filters.stats) then return end
     if craftedOnly then filters.crafted = true end
     filters.profession = profession
-    local matchesProficiency
+    local matchesProficiency, armorRanks
     if playerGear then
         local getSkill = C_SkillInfo and C_SkillInfo.GetSkillLineInfoByID
         if not getSkill or not (C_Item and C_Item.GetItemInfoInstant) then
@@ -352,7 +400,7 @@ function addon.SearchGear(query, requireCombinedBoss, craftedOnly, profession, p
         local level = UnitLevel("player")
         if not level or level < 1 then return {}, "Character level is unavailable." end
         filters.playerGear, filters.level = true, level
-        matchesProficiency = PlayerProficiencyFilter(getSkill)
+        matchesProficiency, armorRanks = PlayerProficiencyFilter(getSkill)
     end
     if filters.level then
         if filters.level < 1 or filters.level > 999 then return {}, "Enter a positive character level from 1 to 999." end
@@ -362,8 +410,16 @@ function addon.SearchGear(query, requireCombinedBoss, craftedOnly, profession, p
     elseif filters.maxLevel and (filters.maxLevel > 999 or filters.minLevel < 1 or filters.minLevel > filters.maxLevel) then
         return {}, "Enter an ascending character-level range, such as 10-12."
     end
-    if filters.near and (filters.near < 1 or filters.near > 999999) then
-        return {}, "Enter a positive stat amount."
+    local statFilters = filters.stats or {}
+    local requiresItemStats = false
+    for _, filter in ipairs(statFilters) do
+        if filter.near then
+            if filter.near < 1 or filter.near > 999999 then return {}, "Enter a positive stat amount." end
+            filter.tolerance = math.max(2, math.floor(filter.near / 5))
+        end
+        local stat = filter.stat
+        filter.includesShared = stat == healingPower or stat == spellDamage
+        if not filter.includesShared and stat ~= spellPower then requiresItemStats = true end
     end
 
     local bossDrops
@@ -379,42 +435,54 @@ function addon.SearchGear(query, requireCombinedBoss, craftedOnly, profession, p
         if not isQuestReward then return {}, hint end
     end
     if filters.armorType and not (C_Item and C_Item.GetItemInfoInstant) then return {}, "Armor type data is unavailable." end
-    if filters.stat and not C_Item.GetItemStats then return {}, "Item stats are unavailable." end
+    if #statFilters > 0 and not (C_Item and C_Item.GetItemStats) then return {}, "Item stats are unavailable." end
 
-    local stat = filters.stat
-    local includesShared = stat == healingPower or stat == spellDamage
-    local isSpellStat = includesShared or stat == spellPower
     local results, uncached = {}, {}
-    local tolerance = filters.near and math.max(2, math.floor(filters.near / 5))
-    local function AddMatch(id, gear, amount)
-        local distance = filters.near and math.abs(amount - filters.near) or 0
-        if tolerance and distance > tolerance then return end
+    local function AddMatch(id, gear, matchLabel, distance)
         local name = addon.index[id]
-        local matchLabel
-        if amount then
-            matchLabel = ("+%g %s"):format(amount, stat[1])
-        elseif filters.maxLevel then
+        if not matchLabel and filters.maxLevel then
             matchLabel = ("Requires %d"):format(gear[2])
         end
         results[#results + 1] = {
-            id = id, name = name, key = name:lower(), distance = distance, requiredLevel = gear[2],
-            matchLabel = matchLabel, quality = gear[4],
+            id = id, name = name, key = name:lower(), distance = distance or 0, requiredLevel = gear[2],
+            matchLabel = matchLabel, quality = gear[4], armorRank = armorRanks and armorRanks[id],
         }
     end
 
-    local function CheckStat(id, gear)
+    local function MatchesStatFlags(flags)
+        for _, filter in ipairs(statFilters) do
+            if not HasStat(flags, filter.stat) and not (filter.includesShared and HasStat(flags, spellPower)) then
+                return false
+            end
+        end
+        return true
+    end
+
+    local function CheckStats(id, gear)
         local cached = C_Item.IsItemDataCachedByID and C_Item.IsItemDataCachedByID(id)
         if C_Item.IsItemDataCachedByID and not cached then return false end
         local values = C_Item.GetItemStats("item:" .. id)
-        if not values and not (cached and isSpellStat) then return false end
-        local amount = ReadStat(values or {}, stat, id, gear[3])
-        if amount > 0 then AddMatch(id, gear, amount) end
+        if not values and (not cached or requiresItemStats) then return false end
+        values = values or {}
+        local labels, distance = {}, 0
+        for _, filter in ipairs(statFilters) do
+            local amount = ReadStat(values, filter.stat, id, gear[3])
+            if amount <= 0 then return true end
+            if filter.near then
+                local difference = math.abs(amount - filter.near)
+                if difference > filter.tolerance then return true end
+                distance = distance + difference
+            end
+            labels[#labels + 1] = ("+%g %s"):format(amount, filter.stat[1])
+        end
+        AddMatch(id, gear, table.concat(labels, " · "), distance)
         return true
     end
 
     local description = Describe(filters)
     local function Finish(unavailable)
         table.sort(results, function(left, right)
+            if left.armorRank ~= right.armorRank then return left.armorRank > right.armorRank end
             if left.distance ~= right.distance then return left.distance < right.distance end
             if filters.maxLevel and left.requiredLevel ~= right.requiredLevel then
                 return left.requiredLevel < right.requiredLevel
@@ -428,6 +496,7 @@ function addon.SearchGear(query, requireCombinedBoss, craftedOnly, profession, p
         elseif unavailable > 1 then
             hint = hint .. (" · %d items unavailable"):format(unavailable)
         end
+        if playerGear then return GroupPlayerGear(results, filters.slot, hint) end
         return results, hint
     end
 
@@ -448,14 +517,14 @@ function addon.SearchGear(query, requireCombinedBoss, craftedOnly, profession, p
             and (not filters.rarity or gear[4] == filters.rarity[2])
             and (not filters.binding or gear[5] == filters.binding[2])
             and (not filters.maxLevel or (level >= filters.minLevel and level <= filters.maxLevel))
-            and (not matchesProficiency or matchesProficiency(id))
             and MatchesCraft(id)
             and (not filters.armorType or MatchesArmorType(id, filters.armorType))
             and (not bossDrops or bossDrops[id])
-            and (not isQuestReward or isQuestReward(id)) then
-            if not stat then
+            and (not isQuestReward or isQuestReward(id))
+            and (not matchesProficiency or matchesProficiency(id)) then
+            if #statFilters == 0 then
                 AddMatch(id, gear)
-            elseif (HasStat(flags, stat) or (includesShared and HasStat(flags, spellPower))) and not CheckStat(id, gear) then
+            elseif MatchesStatFlags(flags) and not CheckStats(id, gear) then
                 uncached[#uncached + 1] = id
             end
         end
@@ -471,7 +540,7 @@ function addon.SearchGear(query, requireCombinedBoss, craftedOnly, profession, p
         local function Step()
             local now = GetTime()
             for id, expires in pairs(waiting) do
-                if CheckStat(id, addon.gear[id]) then
+                if CheckStats(id, addon.gear[id]) then
                     waiting[id] = nil
                 elseif now >= expires then
                     waiting[id] = nil
@@ -486,7 +555,7 @@ function addon.SearchGear(query, requireCombinedBoss, craftedOnly, profession, p
                 local last = math.min(nextItem + 15, #uncached)
                 for i = nextItem, last do
                     local id = uncached[i]
-                    if not CheckStat(id, addon.gear[id]) then
+                    if not CheckStats(id, addon.gear[id]) then
                         if C_Item.RequestLoadItemDataByID and pcall(C_Item.RequestLoadItemDataByID, id) then
                             waiting[id] = now + 1.5
                         else

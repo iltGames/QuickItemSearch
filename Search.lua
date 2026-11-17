@@ -1,5 +1,16 @@
 local _, addon = ...
 
+local searchShortcuts = {
+    ["@target"] = "@target", ["@t"] = "@target",
+    ["@me"] = "@me", ["@gear"] = "@me",
+    ["@dungeon"] = "@dungeon", ["@instance"] = "@dungeon",
+    ["@d"] = "@dungeon", ["@dung"] = "@dungeon", ["@inst"] = "@dungeon",
+}
+
+function addon.GetSearchShortcut(token)
+    return token and searchShortcuts[token:lower()]
+end
+
 function addon.IsPTRItem(id)
     return addon.ptrOnly and addon.ptrOnly[id]
 end
@@ -279,23 +290,24 @@ function addon.Search(input)
             return WithSection(rows, hint)
         end
     end
-    if lowerQuery == "@target" then return addon.SearchTargetLoot() end
-    local shortcut, instanceQuery = lowerQuery:match("^(@?%a+)%s+(.*)$")
+    local shortcut, shortcutQuery = lowerQuery:match("^(@?%a+)%s+(.*)$")
     shortcut = shortcut or lowerQuery
+    local command = addon.GetSearchShortcut(shortcut)
+    if command == "@target" and not shortcutQuery then return addon.SearchTargetLoot() end
     local petShortcut = shortcut:gsub("^@", "")
     if petShortcut == "petspell" or petShortcut == "petspells" then
-        local target = instanceQuery or ""
+        local target = shortcutQuery or ""
         return addon.SearchPetSpells(target:match('^"(.*)"$') or target)
     end
     if shortcut == "@spell" or shortcut == "@spells" then
-        local target = instanceQuery or ""
+        local target = shortcutQuery or ""
         return addon.SearchPlayerSpells(target:match('^"(.*)"$') or target)
     end
-    if shortcut == "@dungeon" or shortcut == "@instance" then
-        return addon.SearchInstanceLoot(instanceQuery or "")
+    if command == "@dungeon" then
+        return addon.SearchInstanceLoot(shortcutQuery or "")
     end
-    local playerGear = (lowerQuery == "my gear" or lowerQuery == "@me") and ""
-        or lowerQuery:match("^my%s+gear%s+(.+)$") or lowerQuery:match("^@me%s+(.+)$")
+    local playerGear = command == "@me" and (shortcutQuery or "")
+        or lowerQuery == "my gear" and "" or lowerQuery:match("^my%s+gear%s+(.+)$")
     if playerGear then return addon.SearchGear(playerGear, false, false, nil, true) end
     local id = ParseID(query)
     if id then
