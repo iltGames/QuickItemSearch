@@ -21,4 +21,5 @@ SpellSearch.lua
 EmoteSearch.lua
 RecipeSearch.lua
 Sources.lua
+QuestSearch.lua
 UI.lua

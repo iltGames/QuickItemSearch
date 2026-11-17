@@ -1,6 +1,9 @@
 ## Quick Item Search 0.4.7
 
 - Show which quests require an item in search result tooltips when QuestieDB is enabled.
+- Search quest names alongside items, or use `@quest` or `@q` to find quests by name or ID. Quest details show objectives, required items, item rewards, and live progress when available.
+- Right-click a required item to open one of its quests.
+- Find dungeons in the main search by name or abbreviation, then select a dungeon to open its loot.
 
 ## Quick Item Search 0.4.6
 

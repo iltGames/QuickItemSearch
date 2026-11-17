@@ -394,6 +394,13 @@ matches("@instance BRD", 2)
 local _, _, _, _, dmSections = addon.Search("@dungeon dm")
 assert(dmSections.title == "Dire Maul East · Alzzin")
 assert(dmSections[1].title == "The Deadmines · Captain")
+for alias, name in pairs({ hot = "The Hall of Thanes", BRD = "Blackrock Depths", vc = "The Deadmines" }) do
+    local listed = section(alias, "Dungeons")
+    assert(listed and #listed == 1 and listed[1].name == name, "Main search should resolve dungeon alias " .. alias)
+end
+local dmDungeons = section("dm", "Dungeons")
+assert(dmDungeons and #dmDungeons == 2 and dmDungeons[1].name == "Dire Maul East"
+    and dmDungeons[2].name == "The Deadmines", "Main search should show both meanings of DM")
 matches('@instance "Krol’dok Stronghold"', 1)
 ForeverDungeonJournal_NS = {
     BOSS_LEVELS = { ["Krol'dok Stronghold"] = { ["First Overseer"] = "43" } },
@@ -413,6 +420,16 @@ assert(mergedSections.title == "First Boss · Lv 43" and #merged == 2 and merged
 assert(mergedSections[2].title == "Trash" and #mergedSections[2].rows == 2)
 local journalOnly, _, _, _, journalSections = addon.Search("@instance journal keep")
 assert(journalOnly[1].name == "Journal Blade" and journalSections.title == "Journal Boss · Lv 24")
+ForeverDungeonJournal_NS.DB["Zul'Farrak"] = { level = "40-50", bosses = {
+    { name = "Gahz'rilla", loot = { { 50001, "Journal Blade", "Sword", 3 } } },
+} }
+local dungeonRows, _, _, _, dungeonSections = addon.Search("zul farrak")
+assert(dungeonSections and dungeonSections.title == "Dungeons", "Plain searches should include dungeon names")
+assert(#dungeonRows == 1 and dungeonRows[1].kind == "dungeon" and dungeonRows[1].name == "Zul'Farrak")
+local zfDungeons = section("zf", "Dungeons")
+assert(zfDungeons and #zfDungeons == 1 and zfDungeons[1].name == "Zul'Farrak")
+local dungeonLoot, _, _, _, dungeonLootSections = addon.Search("@dungeon " .. dungeonRows[1].name)
+assert(dungeonLoot[1].id == 50001 and dungeonLootSections.title == "Gahz'rilla")
 ForeverDungeonJournal_NS = nil
 local _, instanceHint = matches("@dungeon empty")
 assert(instanceHint == "No matching loot for Empty Keep.")

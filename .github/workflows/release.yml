@@ -43,7 +43,7 @@ jobs:
             exit 0
           fi
           mkdir QuickItemSearch
-          cp QuickItemSearch.toc Bindings.xml ItemIndex.lua PtrItemIndex.lua GearIndex.lua CraftedIndex.lua SpellIndex.lua PetSpellIndex.lua RecipeIndex.lua GearSearch.lua Questions.lua Search.lua SpellSearch.lua EmoteSearch.lua RecipeSearch.lua Sources.lua UI.lua README.md CHANGELOG.md LICENSE QuickItemSearch/
+          cp QuickItemSearch.toc Bindings.xml ItemIndex.lua PtrItemIndex.lua GearIndex.lua CraftedIndex.lua SpellIndex.lua PetSpellIndex.lua RecipeIndex.lua GearSearch.lua Questions.lua Search.lua SpellSearch.lua EmoteSearch.lua RecipeSearch.lua Sources.lua QuestSearch.lua UI.lua README.md CHANGELOG.md LICENSE QuickItemSearch/
           archive="QuickItemSearch-$version.zip"
           zip -r "$archive" QuickItemSearch
           unzip -t "$archive"

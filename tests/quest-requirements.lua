@@ -4,7 +4,7 @@ C_Timer = { After = function(_, callback) scheduled[#scheduled + 1] = callback e
 
 local quests = {
     [101] = { name = "Collect Supplies", objectives = { [3] = { { 11 }, { 11 } } } },
-    [102] = { name = "Use Supplies", requiredSourceItems = { 11, 12 } },
+    [102] = { name = "Use Supplies", requiredSourceItems = { 11, 12 }, objectives = { [6] = { { 90, nil, 14 } } } },
     [103] = { name = "Deliver a Message", objectives = { [1] = { { 11 } } } },
     [104] = { name = "Earn Supplies" },
 }
@@ -35,6 +35,10 @@ assert(not tooltip:find("Deliver a Message", 1, true), "NPC objectives must not 
 local _, count = tooltip:gsub("Collect Supplies", "")
 assert(count == 1, "Multiple objectives for the same quest must produce a single line")
 assert(TooltipLines(13) == "", "Unrelated items must omit quest requirements")
+local requiredFor = addon.GetItemQuestRequirements(11)
+assert(#requiredFor == 2 and requiredFor[1].id == 101 and requiredFor[2].id == 102)
+assert(#addon.GetItemQuestRequirements(13) == 0, "Unrelated items must have no quest menu options")
+assert(addon.GetItemQuestRequirements(14)[1].id == 102, "Spell objectives can require an item")
 
 LibQuestieDB = nil
 assert(TooltipLines(12) == "", "QuestieDB must remain optional")

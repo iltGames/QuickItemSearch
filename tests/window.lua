@@ -299,4 +299,96 @@ assert(lastEmote == "Wave", "keyboard navigation must be able to activate anothe
 assert(PressWindowKey("W") and not window.keyboardEnabled,
     "movement must pass through and end result navigation")
 
+local questProgress = "1/4"
+function addon.IsQuestDetailQuery(query) return query == "@quest 86" end
+function addon.Search(query)
+    if query == "@quest pie" then
+        return { { kind = "quest", id = 86, name = "Pie for Billy" } }
+    end
+    assert(query == "@quest 86")
+    return {
+        { kind = "text", name = "Collect meat", matchLabel = questProgress },
+        { id = 769, name = "Chunk of Boar Meat" },
+    }, "Pie for Billy"
+end
+C_Item = {
+    IsItemDataCachedByID = function(id)
+        assert(id == 769, "Quest rows must not request item data for a quest ID")
+        return true
+    end,
+    GetItemInfo = function() return "Chunk of Boar Meat", "|Hitem:769|h[Chunk of Boar Meat]|h" end,
+    GetItemInfoInstant = function() return 769, nil, nil, nil, 133970 end,
+}
+IsModifiedClick = function() return false end
+local openedItem
+SetItemRef = function(link) openedItem = link end
+local function Result(predicate)
+    for _, button in ipairs(buttons) do
+        if button.entry and predicate(button.entry) then return button end
+    end
+end
+toggle("@quest pie")
+local quest = assert(Result(function(entry) return entry.kind == "quest" end))
+quest.scripts.OnEnter(quest)
+quest:Click()
+assert(searchBox:GetText() == "@quest 86", "Clicking a quest should open its detail query")
+questProgress = "3/4"
+window.scripts.OnEvent(window, "QUEST_LOG_UPDATE")
+assert(Result(function(entry) return entry.matchLabel == "3/4" end), "Open quest details should refresh progress")
+Result(function(entry) return entry.id == 769 end):Click()
+assert(openedItem == "item:769", "Clicking an objective item should use the normal inspect action")
+
+function addon.Search(query)
+    if query == "zul farrak" then
+        return { { kind = "dungeon", name = "Zul'Farrak" } }, nil, nil, nil, { title = "Dungeons" }
+    end
+    assert(query == "@dungeon Zul'Farrak")
+    return { { id = 769, name = "Chunk of Boar Meat" } }, "Loot from Zul'Farrak"
+end
+toggle("zul farrak")
+local dungeon = assert(Result(function(entry) return entry.kind == "dungeon" end))
+dungeon.scripts.OnEnter(dungeon)
+dungeon:Click()
+assert(searchBox:GetText() == "@dungeon Zul'Farrak", "Clicking a dungeon should run its loot query")
+assert(Result(function(entry) return entry.id == 769 end))
+
+function addon.GetItemQuestRequirements(id)
+    assert(id == 769)
+    return { { id = 86, name = "Pie for Billy" }, { id = 88, name = "Another Pie Quest" } }
+end
+function addon.Search(query)
+    if query == "boar meat" then return { { id = 769, name = "Chunk of Boar Meat" } } end
+    assert(query == "@quest 88", "The selected menu entry must open the corresponding quest")
+    return {}, "Another Pie Quest"
+end
+toggle("boar meat")
+local ingredient = assert(Result(function(entry) return entry.id == 769 end))
+openedItem = nil
+ingredient.scripts.OnClick(ingredient, "RightButton")
+assert(not openedItem, "Right-click must leave the item inspection action to left-click")
+ClickQuery("@quest 88")
+assert(searchBox:GetText() == "@quest 88")
+addon.GetItemQuestRequirements = function() return {} end
+toggle("boar meat")
+ingredient.scripts.OnClick(ingredient, "RightButton")
+assert(searchBox:GetText() == "boar meat" and not openedItem, "Unrelated items should keep their current search")
+
+function addon.GetItemQuestRequirements()
+    local quests = {}
+    for id = 78, 88 do quests[#quests + 1] = { id = id, name = "Quest " .. id } end
+    return quests
+end
+ingredient.scripts.OnClick(ingredient, "RightButton")
+local nextPage
+for _, button in ipairs(buttons) do
+    if button.label and button.label:GetText() == "Next quests" and button:IsShown() and button.parent:IsShown() then
+        nextPage = button
+        break
+    end
+end
+assert(nextPage, "Long quest lists must offer a second page")
+nextPage:Click()
+ClickQuery("@quest 88")
+assert(searchBox:GetText() == "@quest 88")
+
 print("Window sizing regression passed")
