@@ -46,7 +46,7 @@ local COLORS = {
 }
 local frame, searchBox, summary, message, range, scrollbar
 local queryPopup, history
-local resizeHandle
+local keyboardHint, resizeHandle
 local visibleRows = DEFAULT_ROWS
 local resizing, resizePreviewRows
 local arrowSelected, resultKeyboardActive, pressedResultEnter

@@ -1,7 +1,23 @@
-## Quick Item Search 0.4.0
+## Unreleased
 
 - With What's Training enabled, search `warlock 12` or `warrior 10` for spells unlocked at that exact level. Results distinguish trainer spells from quest rewards, with quest sources on hover.
 - Browse any class with `spells warlock` or `warlock spell`. Class spell sections work without What's Training; enabling it adds known unlock levels and sources.
+- Close the search window with its top-right close button.
+
+## Quick Item Search 0.4.3
+
+- Show a small note at the top of History explaining that only the last 10 searches are shown.
+
+## Quick Item Search 0.4.2
+
+- Browse all hunter pet spell ranks with `petspells`, `@petspells`, `petspell`, or `@petspell`. Add a name and rank to narrow the results, such as `@petspell bite 3`.
+
+## Quick Item Search 0.4.1
+
+- Search `@spell bite` for hunter pet abilities or `@spell bite 3` for a specific rank. Hover a result for the tameable beasts, their zones and wild levels, and the pet level required to train the ability.
+
+## Quick Item Search 0.4.0
+
 - Use `@target` for your current NPC's indexed drops or `@me` for gear around your level that matches your learned proficiencies.
 - Use `@dungeon` or `@instance` with a full or partial dungeon name, or a common abbreviation such as `hot` or `brd`. Inside a dungeon or raid, omit the name to search the current instance.
 - Dungeon results combine AtlasLoot and Forever Dungeon Journal where available. Loot is grouped by boss and Trash, with known boss levels and the dungeon level range. Results show rare-or-better items and uncommon-or-better recipes.
