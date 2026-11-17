@@ -3,6 +3,7 @@
 - Use `@d`, `@dung`, or `@inst` for dungeon loot, `@t` for target loot, and `@gear` for your character's gear.
 - Chain stat filters in a single gear search. For example, `@me chest stam sp` requires both Stamina and Spell Power. Use `def` for Defense.
 - Browse `@me` results by equipment slot. Each slot lists plate first, followed by mail, leather, and cloth.
+- Fixed the search window blocking movement keys after the search box lost focus.
 
 ## Quick Item Search 0.4.4
 

@@ -4,7 +4,16 @@ local resizeHandle
 local buttons = {}
 local searchBox
 local methods = {}
-function methods:SetScript(name, callback) self.scripts[name] = callback end
+function methods:SetScript(name, callback)
+    self.scripts[name] = callback
+    if callback and (name == "OnKeyDown" or name == "OnKeyUp") then
+        self.keyboardEnabled = true
+    end
+end
+function methods:EnableKeyboard(enabled) self.keyboardEnabled = enabled end
+function methods:SetPropagateKeyboardInput(propagate) self.propagateKeyboard = propagate end
+function methods:SetFocus() self.focused = true end
+function methods:ClearFocus() self.focused = false end
 function methods:Show() self.shown = true end
 function methods:Hide()
     self.shown = false
@@ -61,6 +70,7 @@ SlashCmdList = {}
 UISpecialFrames = {}
 tinsert = table.insert
 InCombatLockdown = function() return false end
+GetCurrentKeyBoardFocus = function() return searchBox and searchBox.focused and searchBox or nil end
 local x, y = 100, 800
 GetCursorPosition = function() return x, y end
 QuickItemSearchSettings = {rows = 20}
@@ -226,4 +236,41 @@ for _, button in ipairs(buttons) do
 end
 assert(GameTooltip:IsShown() and tooltipLines[2] == "Requires pet level 16 to train.")
 assert(tooltipLines[4] == "Deepmoss Creeper - Stonetalon Mountains (Level 16-17)")
+
+local window = QuickItemSearchFrame
+local function PressWindowKey(key)
+    assert(window:IsShown() and not GetCurrentKeyBoardFocus())
+    if not window.keyboardEnabled then return true end
+    if window.scripts.OnKeyDown then window.scripts.OnKeyDown(window, key) end
+    return window.propagateKeyboard == true
+end
+
+InCombatLockdown = function() return true end
+searchBox.scripts.OnEnterPressed(searchBox)
+assert(PressWindowKey("W"), "an unfocused search must pass movement keys through in combat")
+assert(not window.keyboardEnabled, "the idle search window must leave game bindings alone")
+InCombatLockdown = function() return false end
+
+local lastEmote
+function addon.Search()
+    return {
+        {kind = "emote", name = "Wave"},
+        {kind = "emote", name = "Bow"},
+    }
+end
+function addon.PerformSearchEmote(entry)
+    lastEmote = entry.name
+    return true
+end
+toggle("emote")
+searchBox.scripts.OnArrowPressed(searchBox, "DOWN")
+searchBox.scripts.OnEnterPressed(searchBox)
+assert(lastEmote == "Bow", "Enter must activate the selected search result")
+assert(not PressWindowKey("UP"), "result navigation must consume the Up key")
+assert(not PressWindowKey("ENTER"), "result navigation must consume Enter")
+window.scripts.OnKeyUp(window, "ENTER")
+assert(lastEmote == "Wave", "keyboard navigation must be able to activate another result")
+assert(PressWindowKey("W") and not window.keyboardEnabled,
+    "movement must pass through and end result navigation")
+
 print("Window sizing regression passed")

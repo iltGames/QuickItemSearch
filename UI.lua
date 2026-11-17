@@ -320,6 +320,8 @@ end
 local function ReleaseResultKeyboard()
     StopArrowRepeat()
     if resultKeyboardActive then
+        frame:SetScript("OnKeyDown", nil)
+        frame:SetScript("OnKeyUp", nil)
         frame:EnableKeyboard(false)
     end
     if resultKeyboardActive or arrowSelected then
@@ -815,6 +817,36 @@ local function CreateQueryPopup()
     AddPopupButton("Examples", "Interface\\Icons\\INV_Misc_Book_09", -46, queryExamples)
 end
 
+local function OnResultKeyDown(self, key)
+    if InCombatLockdown() then
+        ReleaseResultKeyboard()
+        return
+    end
+    local navigating = not GetCurrentKeyBoardFocus()
+    local arrow = navigating and ARROW_DIRECTION[key]
+    local enter = navigating and (key == "ENTER" or key == "NUMPADENTER")
+    self:SetPropagateKeyboardInput(not (arrow or enter))
+    if arrow then
+        pressedResultEnter = nil
+        PressArrow(key)
+    elseif enter then
+        StopArrowRepeat()
+        pressedResultEnter = key
+    else
+        ReleaseResultKeyboard()
+    end
+end
+
+local function OnResultKeyUp(_, key)
+    if key == heldArrow then StopArrowRepeat() end
+    if key ~= pressedResultEnter then return end
+    pressedResultEnter = nil
+    local entry = results[selected]
+    if CanActivate(entry) and not InCombatLockdown() and not GetCurrentKeyBoardFocus() then
+        SelectResult(entry)
+    end
+end
+
 local function CreateWindow()
     local settings = _G[settingsKey]
     if type(settings) ~= "table" then
@@ -915,6 +947,8 @@ local function CreateWindow()
         if not InCombatLockdown() then
             resultKeyboardActive = true
             frame:SetPropagateKeyboardInput(true)
+            frame:SetScript("OnKeyDown", OnResultKeyDown)
+            frame:SetScript("OnKeyUp", OnResultKeyUp)
             frame:EnableKeyboard(true)
             keyboardHint:SetText(RESULT_KEYS)
         end
@@ -1065,34 +1099,6 @@ local function CreateWindow()
             if self:IsShown() and addon.GetSearchShortcut(query) == "@target" then SearchNow() end
         else
             OnItemData(self, event, ...)
-        end
-    end)
-    frame:SetScript("OnKeyDown", function(self, key)
-        if InCombatLockdown() then
-            ReleaseResultKeyboard()
-            return
-        end
-        local navigating = resultKeyboardActive and not GetCurrentKeyBoardFocus()
-        local arrow = navigating and ARROW_DIRECTION[key]
-        local enter = navigating and (key == "ENTER" or key == "NUMPADENTER")
-        self:SetPropagateKeyboardInput(not (arrow or enter))
-        if arrow then
-            pressedResultEnter = nil
-            PressArrow(key)
-        elseif enter then
-            StopArrowRepeat()
-            pressedResultEnter = key
-        else
-            ReleaseResultKeyboard()
-        end
-    end)
-    frame:SetScript("OnKeyUp", function(_, key)
-        if key == heldArrow then StopArrowRepeat() end
-        if key ~= pressedResultEnter then return end
-        pressedResultEnter = nil
-        local entry = results[selected]
-        if CanActivate(entry) and not InCombatLockdown() and not GetCurrentKeyBoardFocus() then
-            SelectResult(entry)
         end
     end)
     frame:SetScript("OnHide", function()
