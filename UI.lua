@@ -13,6 +13,25 @@ local ARROW_REPEAT_START = 0.16
 local ARROW_REPEAT_MIN = 0.045
 local ARROW_REPEAT_ACCELERATION = 0.84
 local ARROW_DIRECTION = { UP = -1, DOWN = 1 }
+local HISTORY_LIMIT = 10
+local MAX_QUERY_BYTES = 512
+local queryExamples = {
+    "@target", "@me chest", "linen cloth", "rings from 10-12 with agility",
+    "@dungeon krol'dok", 'rare boss:"Edwin VanCleef"', "spell thorns",
+    "enchant gloves agi", "craft arcanite transmute", "usedin stranglekelp",
+    "gather stranglekelp", "train first aid 150", "skin 125",
+}
+local queryShortcuts = {
+    { "Target", "@target", "Show your target's drops." },
+    { "Me", "@me", "Find gear for your character." },
+    { "Dungeon", "@dungeon", "Find loot by dungeon name." },
+}
+local queryFields = {
+    { "Level", "lvl ", "Add a character level or range." },
+    { "Boss", 'boss:""', "Filter drops by boss name.", 1 },
+    { "Stat", "with ", "Add a stat, such as agility." },
+    { "Crafted", "crafted", "Show only crafted gear." },
+}
 local COLORS = {
     panel = { 0.073, 0.066, 0.057, 0.98 },
     border = { 0.38, 0.30, 0.19, 1 },
@@ -26,13 +45,12 @@ local COLORS = {
     mutedText = { 0.71, 0.66, 0.57 },
 }
 local frame, searchBox, summary, message, range, scrollbar
-local keyboardHint, resizeHandle
+local queryPopup, history
+local resizeHandle
 local visibleRows = DEFAULT_ROWS
 local resizing, resizePreviewRows
 local arrowSelected, resultKeyboardActive, pressedResultEnter
 local heldArrow, arrowTimer
-local SEARCH_KEYS = "Up / Down   Navigate     Enter   Release Focus     Esc   Close"
-local RESULT_KEYS = "Up / Down   Navigate     Enter   Activate     Esc   Close"
 local rows, results = {}, {}
 local primaryResults, resultSections
 local expandedSections
@@ -46,6 +64,19 @@ local hoveredRow
 local hoverAwaitingData
 local hoverRefresh
 local moving
+
+local function RememberQuery(query)
+    query = query:match("^%s*(.-)%s*$")
+    if query == "" then return end
+    for index, previous in ipairs(history) do
+        if previous == query then
+            table.remove(history, index)
+            break
+        end
+    end
+    table.insert(history, 1, query)
+    history[HISTORY_LIMIT + 1] = nil
+end
 
 local function ReadItem(id)
     local name, link, quality, _, _, _, _, _, _, icon = C_Item.GetItemInfo(id)
@@ -221,6 +252,7 @@ local function ShowHover(row)
         if entry.skillThresholds then
             GameTooltip:AddLine(FormatSkillThresholds(entry.profession, entry.skillThresholds))
         end
+        if addon.AppendSpellUnlockSources then addon.AppendSpellUnlockSources(GameTooltip, entry) end
         GameTooltip:Show()
         return
     end
@@ -288,9 +320,6 @@ local function ReleaseResultKeyboard()
     if resultKeyboardActive then
         frame:EnableKeyboard(false)
     end
-    if resultKeyboardActive or arrowSelected then
-        keyboardHint:SetText(SEARCH_KEYS)
-    end
     arrowSelected, resultKeyboardActive, pressedResultEnter = nil, nil, nil
 end
 
@@ -357,7 +386,12 @@ local function SearchNow()
     CancelStatSearch()
     HideHover()
     ClearPending()
-    local matches, hint, loadStats, answerText, sections = addon.Search(searchBox:GetText())
+    local query = searchBox:GetText()
+    if not query:find("%S") then
+        ShowResults({}, "")
+        return
+    end
+    local matches, hint, loadStats, answerText, sections = addon.Search(query)
     ShowResults(matches, hint, answerText, sections)
     if loadStats then
         cancelStatSearch = loadStats(function(loadedMatches, loadedHint, _, loadedAnswer, loadedSections)
@@ -395,6 +429,7 @@ end
 local function SelectResult(entry)
     local id = entry.id
     ClearPending()
+    queryPopup:Hide()
     if entry.toggleSection then
         local title = entry.toggleSection
         local wasExpanded = expandedSections[title]
@@ -403,6 +438,7 @@ local function SelectResult(entry)
         return
     end
     if entry.kind == "text" then return end
+    RememberQuery(searchBox:GetText())
     if entry.kind == "emote" then
         SetActionMessage(addon.PerformSearchEmote(entry) and "" or "Emotes are unavailable in this client.")
         return
@@ -490,9 +526,6 @@ local function MoveSelection(delta)
     end
     if not results[nextSelection] then return end
     local actionable = not not CanActivate(results[nextSelection])
-    if not resultKeyboardActive and actionable ~= arrowSelected then
-        keyboardHint:SetText(actionable and RESULT_KEYS or SEARCH_KEYS)
-    end
     arrowSelected = actionable
     if nextSelection == selected then return end
     selected = nextSelection
@@ -615,12 +648,174 @@ local function StartResizingWindow()
     end)
 end
 
+local function HideButtonTooltip(button)
+    if GameTooltip:IsOwned(button) then GameTooltip:Hide() end
+end
+
+local function SetButtonTooltip(button, label)
+    button.tooltipText = label
+    button:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+        GameTooltip:SetText(label)
+        GameTooltip:Show()
+    end)
+    button:SetScript("OnLeave", HideButtonTooltip)
+    button:SetScript("OnHide", HideButtonTooltip)
+end
+
+local function CreateQueryPopup()
+    local rowHeight = 24
+    queryPopup = CreateFrame("Frame", nil, frame, "BackdropTemplate")
+    queryPopup:SetWidth(310)
+    queryPopup:SetFrameStrata("FULLSCREEN_DIALOG")
+    queryPopup:SetClampedToScreen(true)
+    queryPopup:EnableMouse(true)
+    queryPopup:SetBackdrop(frame:GetBackdrop())
+    queryPopup:SetBackdropColor(unpack(COLORS.panel))
+    queryPopup:SetBackdropBorderColor(unpack(COLORS.border))
+    queryPopup:Hide()
+
+    local empty = queryPopup:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    empty:SetPoint("TOPLEFT", 12, -13)
+    empty:SetText("No recent searches")
+
+    local historySummary = queryPopup:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    historySummary:SetPoint("TOPLEFT", 12, -10)
+    historySummary:SetText("Only showing the last " .. HISTORY_LIMIT .. " searches")
+    historySummary:Hide()
+
+    local fieldsHeight = 72
+    local fields = CreateFrame("Frame", nil, queryPopup)
+    fields:SetPoint("TOPLEFT", 0, 0)
+    fields:SetPoint("TOPRIGHT", 0, 0)
+    fields:SetHeight(fieldsHeight)
+    fields:Hide()
+    local fieldsLabel = fields:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    fieldsLabel:SetPoint("TOPLEFT", 11, -8)
+    fieldsLabel:SetText("Insert field")
+    local function FillQuery(query, cursorOffset)
+        if #query > MAX_QUERY_BYTES then return end
+        queryPopup:Hide()
+        searchBox:SetText(query)
+        searchBox:SetFocus()
+        searchBox:SetCursorPosition(#query - (cursorOffset or 0))
+    end
+    local function AddFieldButton(label, description, x, y, width, onClick)
+        local button = CreateFrame("Button", nil, fields, "UIPanelButtonTemplate")
+        button:SetPoint("TOPLEFT", x, y)
+        button:SetSize(width, 21)
+        button:SetText(label)
+        SetButtonTooltip(button, description)
+        button:SetScript("OnClick", onClick)
+    end
+    for index, shortcut in ipairs(queryShortcuts) do
+        local token = shortcut[2]
+        AddFieldButton(shortcut[1], shortcut[3], 7 + (index - 1) * 100, -22, 95, function()
+            if token == "@target" then
+                FillQuery(token)
+                return
+            end
+            local current = searchBox:GetText():match("^%s*(.-)%s*$")
+            local existing, rest = current:match("^(@%a+)%s*(.*)$")
+            existing = existing and existing:lower()
+            if existing == "@target" or existing == "@me" or existing == "@dungeon" or existing == "@instance" then
+                current = rest
+            end
+            FillQuery(token .. " " .. current)
+        end)
+    end
+    for index, field in ipairs(queryFields) do
+        AddFieldButton(field[1], field[3], 7 + (index - 1) * 75, -47, 70, function()
+            local current = searchBox:GetText():gsub("%s+$", "")
+            local prefix = current:find("%S") and current .. " " or ""
+            FillQuery(prefix .. field[2], field[4])
+        end)
+    end
+
+    local buttons = {}
+    queryPopup.buttons = buttons
+    for index = 1, math.max(HISTORY_LIMIT, #queryExamples) do
+        local button = CreateFrame("Button", nil, queryPopup)
+        button:SetHeight(rowHeight)
+        local highlight = button:CreateTexture(nil, "HIGHLIGHT")
+        highlight:SetAllPoints()
+        highlight:SetColorTexture(unpack(COLORS.hover))
+        button.label = button:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+        button.label:SetPoint("LEFT", 7, 0)
+        button.label:SetPoint("RIGHT", -7, 0)
+        button.label:SetJustifyH("LEFT")
+        button.label:SetWordWrap(false)
+        button:SetScript("OnClick", function(self)
+            local query = self.query
+            queryPopup:Hide()
+            RememberQuery(query)
+            searchBox:SetText(query)
+            SearchNow()
+            searchBox:SetFocus()
+            searchBox:SetCursorPosition(#query)
+        end)
+        buttons[index] = button
+    end
+
+    local function AddPopupButton(label, icon, right, queries)
+        local button = CreateFrame("Button", nil, frame)
+        button:SetSize(24, 24)
+        button:SetPoint("TOPRIGHT", right, -18)
+        button:SetNormalTexture(icon)
+        button:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
+        SetButtonTooltip(button, label)
+        button:SetScript("OnClick", function(self)
+            HideButtonTooltip(self)
+            if queryPopup:IsShown() and queryPopup.anchor == self then
+                queryPopup:Hide()
+                return
+            end
+            HideHover()
+            local showFields = queries == queryExamples
+            fields:SetShown(showFields)
+            historySummary:SetShown(not showFields)
+            local summaryHeight = showFields and 0 or 22
+            local fieldsOffset = showFields and fieldsHeight or summaryHeight
+            queryPopup.selected = 0
+            queryPopup.count = #queries
+            for index, row in ipairs(buttons) do
+                row:UnlockHighlight()
+                local query = queries[index]
+                row.query = query
+                if query then
+                    local top = -5 - fieldsOffset - (index - 1) * rowHeight
+                    row:ClearAllPoints()
+                    row:SetPoint("TOPLEFT", 5, top)
+                    row:SetPoint("TOPRIGHT", -5, top)
+                    local display = query:match("|H.-|h(.-)|h") or query
+                    row.label:SetText((display:gsub("|", "||")))
+                end
+                row:SetShown(query ~= nil)
+            end
+            empty:ClearAllPoints()
+            empty:SetPoint("TOPLEFT", 12, -13 - fieldsOffset)
+            empty:SetShown(#queries == 0)
+            queryPopup:SetHeight(10 + fieldsOffset + math.max(1, #queries) * rowHeight)
+            queryPopup.anchor = self
+            queryPopup:ClearAllPoints()
+            queryPopup:SetPoint("TOPRIGHT", self, "BOTTOMRIGHT", 0, -5)
+            queryPopup:Show()
+            searchBox:SetFocus()
+        end)
+    end
+
+    AddPopupButton("History", "Interface\\Icons\\INV_Misc_PocketWatch_01", -76, history)
+    AddPopupButton("Examples", "Interface\\Icons\\INV_Misc_Book_09", -46, queryExamples)
+end
+
 local function CreateWindow()
     local settings = _G[settingsKey]
     if type(settings) ~= "table" then
         settings = {}
         _G[settingsKey] = settings
     end
+    if type(settings.history) ~= "table" then settings.history = {} end
+    history = settings.history
     local savedRows = tonumber(settings.rows)
     visibleRows = savedRows and Clamp(math.floor(savedRows), MIN_ROWS, MAX_ROWS) or DEFAULT_ROWS
     local width = Clamp(tonumber(settings.width) or DEFAULT_WIDTH, MIN_WIDTH,
@@ -658,25 +853,39 @@ local function CreateWindow()
     searchBox = CreateFrame("EditBox", nil, frame, "SearchBoxTemplate")
     searchBox:SetHeight(34)
     searchBox:SetPoint("TOPLEFT", 24, -13)
-    searchBox:SetPoint("TOPRIGHT", -24, -13)
+    searchBox:SetPoint("TOPRIGHT", -106, -13)
     searchBox:SetFontObject("GameFontHighlightLarge")
     searchBox:SetTextColor(unpack(COLORS.text))
     searchBox:SetAltArrowKeyMode(false)
     searchBox:SetAutoFocus(false)
-    searchBox:SetMaxBytes(512)
-    searchBox.Instructions:SetText("Search items, gear, bosses, or ask a question")
+    searchBox:SetMaxBytes(MAX_QUERY_BYTES)
+    searchBox.Instructions:SetText("Search items, gear, and more")
     searchBox.Instructions:SetTextColor(unpack(COLORS.mutedText))
     for _, key in ipairs({ "Left", "Middle", "Right" }) do
         local piece = searchBox[key]
         if piece then piece:SetVertexColor(0.77, 0.69, 0.54) end
     end
+    CreateQueryPopup()
+    local closeButton = CreateFrame("Button", "QuickItemSearchCloseButton", frame, "UIPanelCloseButton")
+    closeButton:SetSize(24, 24)
+    closeButton:SetPoint("TOPRIGHT", -16, -18)
+    closeButton:SetScript("OnClick", function() frame:Hide() end)
     searchBox:HookScript("OnTextChanged", function()
+        queryPopup:Hide()
         ReleaseResultKeyboard()
         CancelStatSearch()
         if debounce then debounce:Cancel() end
         debounce = C_Timer.NewTimer(0.15, SearchNow)
     end)
     searchBox:SetScript("OnArrowPressed", function(_, key)
+        if queryPopup:IsShown() and ARROW_DIRECTION[key] then
+            if queryPopup.count == 0 then return end
+            local previous = queryPopup.buttons[queryPopup.selected]
+            if previous then previous:UnlockHighlight() end
+            queryPopup.selected = Clamp(queryPopup.selected + ARROW_DIRECTION[key], 1, queryPopup.count)
+            queryPopup.buttons[queryPopup.selected]:LockHighlight()
+            return
+        end
         if debounce then SearchNow() end
         if ARROW_DIRECTION[key] then PressArrow(key) end
     end)
@@ -686,6 +895,12 @@ local function CreateWindow()
     searchBox:HookScript("OnEditFocusGained", ReleaseResultKeyboard)
     searchBox:HookScript("OnEditFocusLost", StopArrowRepeat)
     searchBox:SetScript("OnEnterPressed", function(self)
+        if queryPopup:IsShown() and queryPopup.selected > 0 then
+            queryPopup.buttons[queryPopup.selected]:Click()
+            return
+        end
+        queryPopup:Hide()
+        RememberQuery(self:GetText())
         local entry = arrowSelected and results[selected]
         ReleaseResultKeyboard()
         self:ClearFocus()
@@ -694,11 +909,13 @@ local function CreateWindow()
             resultKeyboardActive = true
             frame:SetPropagateKeyboardInput(true)
             frame:EnableKeyboard(true)
-            keyboardHint:SetText(RESULT_KEYS)
         end
         SelectResult(entry)
     end)
-    searchBox:SetScript("OnEscapePressed", function() frame:Hide() end)
+    searchBox:SetScript("OnEscapePressed", function()
+        if queryPopup:IsShown() then queryPopup:Hide()
+        else frame:Hide() end
+    end)
 
     for index = 1, MAX_ROWS do
         local row = CreateFrame("Button", nil, frame)
@@ -769,13 +986,6 @@ local function CreateWindow()
     range = frame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     range:SetPoint("BOTTOMLEFT", 14, 12)
     range:SetTextColor(unpack(COLORS.mutedText))
-    keyboardHint = frame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    keyboardHint:SetPoint("BOTTOMRIGHT", -23, 12)
-    keyboardHint:SetPoint("LEFT", range, "RIGHT", 8, 0)
-    keyboardHint:SetJustifyH("RIGHT")
-    keyboardHint:SetWordWrap(false)
-    keyboardHint:SetText(SEARCH_KEYS)
-    keyboardHint:SetTextColor(unpack(COLORS.mutedText))
     local dragHandle = CreateFrame("Frame", nil, frame)
     dragHandle:SetPoint("TOPLEFT", 8, -1)
     dragHandle:SetPoint("TOPRIGHT", -8, -1)
@@ -831,9 +1041,12 @@ local function CreateWindow()
     frame:RegisterEvent("ITEM_DATA_LOAD_RESULT")
     frame:RegisterEvent("GET_ITEM_INFO_RECEIVED")
     frame:RegisterEvent("PLAYER_REGEN_DISABLED")
+    frame:RegisterEvent("PLAYER_TARGET_CHANGED")
     frame:SetScript("OnEvent", function(self, event, ...)
         if event == "PLAYER_REGEN_DISABLED" then
             ReleaseResultKeyboard()
+        elseif event == "PLAYER_TARGET_CHANGED" then
+            if self:IsShown() and searchBox:GetText():lower():match("^%s*@target%s*$") then SearchNow() end
         else
             OnItemData(self, event, ...)
         end
@@ -867,6 +1080,8 @@ local function CreateWindow()
         end
     end)
     frame:SetScript("OnHide", function()
+        queryPopup:Hide()
+        RememberQuery(searchBox:GetText())
         StopResizingWindow()
         ReleaseResultKeyboard()
         CancelStatSearch()
@@ -889,6 +1104,8 @@ local function Toggle(query)
         return
     end
     frame:Show()
+    queryPopup:Hide()
+    if query then RememberQuery(query) end
     searchBox:SetText(query or "")
     SearchNow()
     searchBox:SetFocus()

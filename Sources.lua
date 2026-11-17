@@ -1,7 +1,17 @@
 local addonName, addon = ...
 local ATLAS_DUNGEONS = "AtlasLootClassic_DungeonsAndRaids"
 local storageName = addonName .. "SourceDB"
-local atlasDB, atlasItems, atlasBosses, atlasBossDrops
+local atlasDB, atlasItems, atlasBosses, atlasBossDrops, atlasInstances
+local instanceAliases = {
+    hot = "hallofthanes", rol = "ruinsoflordaeron", cod = "cityofdalaran",
+    esw = "excavationsitewetlands", ks = "kroldokstronghold", dc = "drownedcity",
+    st = "templeofatalhakkar", vc = "deadmines", wc = "wailingcaverns",
+    sfk = "shadowfangkeep", bfd = "blackfathomdeeps", rfk = "razorfenkraul",
+    rfd = "razorfendowns", zf = "zulfarrak", brd = "blackrockdepths",
+    lbrs = "lowerblackrockspire", ubrs = "upperblackrockspire", strat = "stratholme",
+    scholo = "scholomance", sm = "scarletmonastery", dme = "diremauleast",
+    dmw = "diremaulwest", dmn = "diremaulnorth",
+}
 
 local function Clean(text)
     if type(text) ~= "string" or (issecretvalue and issecretvalue(text)) then return nil end
@@ -11,6 +21,41 @@ end
 
 local function Rate(value)
     if type(value) == "number" and value >= 0 and value <= 100 then return value end
+end
+
+local function InstanceKey(name)
+    return (name:lower():gsub("^the%s+", ""):gsub("’", ""):gsub("[%p%s]", ""))
+end
+
+local function DungeonKey(name)
+    local key = InstanceKey(name)
+    return key == "sunkentemple" and "templeofatalhakkar" or key
+end
+
+local function LevelText(level, high)
+    if type(level) == "table" then return LevelText(level[1], level[2]) end
+    if type(level) == "string" then
+        return level:match("^%d+%+?$") or level:gsub("–", "-"):match("^%d+%s*%-%s*%d+$")
+    end
+    if type(level) == "number" and level > 0 then
+        return type(high) == "number" and high > level and (level .. "–" .. high) or tostring(level)
+    end
+end
+
+local function InstanceGroup(groups, name, order)
+    local key = InstanceKey(name)
+    local group = groups[key]
+    if not group then
+        group = { name = name, order = order, loot = {} }
+        groups[key] = group
+    end
+    group.order = math.min(group.order, order)
+    return group
+end
+
+local function IsTrashList(name, locales)
+    return name:lower():find("trash", 1, true) or (locales
+        and (name == Clean(locales["Trash"]) or name == Clean(locales["Trash Mobs"])))
 end
 
 local function AtlasIndex()
@@ -23,9 +68,9 @@ local function AtlasIndex()
         db = itemDB:Get(ATLAS_DUNGEONS)
     end
     if type(db) ~= "table" then return end
-    if atlasDB == db then return atlasItems, atlasBosses, atlasBossDrops end
+    if atlasDB == db then return atlasItems, atlasBosses, atlasBossDrops, atlasInstances end
 
-    local items, bosses, bossDrops = {}, {}, {}
+    local items, bosses, bossDrops, instances = {}, {}, {}, {}
     local dropRates = atlas.Data and atlas.Data.Droprate
     for key, instance in pairs(db) do
         if type(instance) == "table" and type(instance.items) == "table" then
@@ -34,6 +79,13 @@ local function AtlasIndex()
                     local named, zone, name = pcall(itemDB.GetNameData_UNSAFE, itemDB, ATLAS_DUNGEONS, key, bossIndex)
                     zone, name = Clean(zone), Clean(name)
                     if named and name and name ~= "" and zone and zone ~= "" then
+                        local zoneKey = DungeonKey(zone)
+                        local instanceLoot = instances[zoneKey] or { name = zone, groups = {} }
+                        instances[zoneKey] = instanceLoot
+                        local range = instance.LevelRange
+                        if type(range) == "table" then
+                            instanceLoot.level = instanceLoot.level or LevelText(range[2], range[3])
+                        end
                         local lootIDs = {}
                         local npcID = boss.npcID
                         if type(npcID) == "table" then npcID = #npcID == 1 and npcID[1] or nil end
@@ -57,15 +109,30 @@ local function AtlasIndex()
                             end
                         end
                         if next(lootIDs) then
-                            bosses[#bosses + 1] = { name = name, key = name:lower(), loot = lootIDs, isEncounter = not boss.ExtraList }
+                            local trash = boss.ExtraList and IsTrashList(name, atlas.Locales)
+                            if trash or not boss.ExtraList then
+                                local groupName = trash and "Trash" or name
+                                local order = trash and math.huge or bossIndex
+                                local group = InstanceGroup(instanceLoot.groups, groupName, order)
+                                if not trash then
+                                    group.level = group.level or LevelText(boss.Level)
+                                    group.npcID = group.npcID or npcID
+                                end
+                                for id in pairs(lootIDs) do group.loot[id] = true end
+                            end
+                            bosses[#bosses + 1] = {
+                                name = name, key = name:lower(), loot = lootIDs,
+                                npcIDs = type(boss.npcID) == "table" and boss.npcID or (npcID and { npcID }),
+                                isEncounter = not boss.ExtraList,
+                            }
                         end
                     end
                 end
             end
         end
     end
-    atlasDB, atlasItems, atlasBosses, atlasBossDrops = db, items, bosses, bossDrops
-    return items, bosses, bossDrops
+    atlasDB, atlasItems, atlasBosses, atlasBossDrops, atlasInstances = db, items, bosses, bossDrops, instances
+    return items, bosses, bossDrops, instances
 end
 
 local function FindBossMatches(bosses, query, exactOnly, encountersOnly)
@@ -96,29 +163,275 @@ function addon.GetBossDropItems(query)
     return drops
 end
 
-function addon.SearchBossLoot(query, exactOnly)
-    local ok, _, bosses = pcall(AtlasIndex)
-    if not ok or not bosses or #bosses == 0 then return nil, "AtlasLoot boss data is unavailable." end
-    local matches = FindBossMatches(bosses, query, exactOnly)
-    if #matches == 0 then return nil, "No matching bosses." end
-
-    local results, seen = {}, {}
-    for _, boss in ipairs(matches) do
-        for id in pairs(boss.loot) do
-            if not seen[id] and not addon.IsPTRItem(id) then
-                seen[id] = true
-                local name = addon.index[id]
-                results[#results + 1] = { id = id, name = name, key = name and name:lower() or "~" }
-            end
+local function LootRows(ids, qualities, journalItems)
+    local results = {}
+    for id in pairs(ids) do
+        if not addon.IsPTRItem(id) then
+            local item = journalItems and journalItems[id]
+            local name = addon.index[id] or (item and item[2])
+            results[#results + 1] = {
+                id = id, name = name, key = name and name:lower() or "~", quality = qualities and qualities[id],
+            }
         end
     end
     table.sort(results, function(left, right)
         if left.key == right.key then return left.id < right.id end
         return left.key < right.key
     end)
+    return results
+end
 
+local function InstanceItemQuality(id, journalItem)
+    local quality = C_Item.GetItemQualityByID and C_Item.GetItemQualityByID(id)
+    if issecretvalue and issecretvalue(quality) then quality = nil end
+    local gear = addon.gear and addon.gear[id]
+    if quality == nil and gear then quality = gear[4] end
+    if quality == nil and journalItem then quality = journalItem[4] end
+    if quality == nil and C_Item.GetItemInfo then quality = select(3, C_Item.GetItemInfo(id)) end
+    if type(quality) ~= "number" or (issecretvalue and issecretvalue(quality)) then return end
+    if quality >= 3 then return quality end
+    if quality ~= 2 then return false end
+    local class
+    if C_Item.GetItemInfoInstant then class = select(6, C_Item.GetItemInfoInstant(id)) end
+    if class == nil and journalItem and type(journalItem[3]) == "string" then
+        return (journalItem[3]:match("^Recipe") or journalItem[3] == "Blueprint") and quality or false
+    end
+    if type(class) ~= "number" or (issecretvalue and issecretvalue(class)) then return end
+    return class == 9 and quality or false -- Recipe item class.
+end
+
+local function MergeInstance(pair, journal, journalItems)
+    local atlas, dungeon = pair.atlas, pair.journal
+    if not dungeon then return atlas end
+    local instance = { name = pair.name, level = LevelText(dungeon.level) or (atlas and atlas.level), groups = {} }
+    local nextOrder = 0
+    for _, source in pairs(atlas and atlas.groups or {}) do
+        local group = InstanceGroup(instance.groups, source.name, source.order)
+        group.level, group.npcID = source.level, source.npcID
+        for id in pairs(source.loot) do group.loot[id] = true end
+        if source.order < math.huge then nextOrder = math.max(nextOrder, source.order) end
+    end
+    local levels = journal.BOSS_LEVELS or {}
+    for index, boss in ipairs(dungeon.bosses or {}) do
+        local name = Clean(boss.name)
+        if name and name ~= "" then
+            local trash = boss.trash or IsTrashList(name)
+            name = trash and "Trash" or name
+            local group = instance.groups[InstanceKey(name)]
+            if not group and not trash then
+                for _, alias in ipairs(boss.aliases or {}) do
+                    group = instance.groups[InstanceKey(alias)]
+                    if group then break end
+                end
+                if not group and type(boss.npcID) == "number" then
+                    for _, candidate in pairs(instance.groups) do
+                        if candidate.npcID == boss.npcID then group = candidate; break end
+                    end
+                end
+            end
+            group = group or InstanceGroup(instance.groups, name, trash and math.huge or nextOrder + index)
+            if not trash then
+                local byDungeon = levels[boss.fdjDungeon or pair.name]
+                group.level = LevelText(byDungeon and byDungeon[boss.name]) or LevelText(boss.level) or group.level
+            end
+            for _, item in ipairs(boss.loot or {}) do
+                if type(item[1]) == "number" and item[1] > 0 then
+                    group.loot[item[1]] = true
+                    journalItems[item[1]] = item
+                end
+            end
+        end
+    end
+    return instance
+end
+
+function addon.SearchInstanceLoot(query)
+    if query == "" then
+        local name, instanceType = GetInstanceInfo()
+        if instanceType ~= "party" and instanceType ~= "raid" then
+            return {}, "Enter a dungeon name or use @dungeon inside an instance."
+        end
+        query = Clean(name) or ""
+    end
+    local key = DungeonKey(query):gsub("^kroldrok", "kroldok")
+    key = instanceAliases[key] or key
+    if #key < 2 then return {}, "Enter at least two characters of the dungeon name." end
+
+    local ok, _, _, _, atlasInstancesByName = pcall(AtlasIndex)
+    local journal = _G.ForeverDungeonJournal_NS
+    local instances = {}
+    for instanceKey, instance in pairs(ok and atlasInstancesByName or {}) do
+        instances[instanceKey] = { name = instance.name, atlas = instance }
+    end
+    for name, dungeon in pairs(journal and journal.DB or {}) do
+        if type(name) == "string" and type(dungeon) == "table" then
+            local instanceKey = DungeonKey(name)
+            local pair = instances[instanceKey] or {}
+            pair.name, pair.journal = name, dungeon
+            instances[instanceKey] = pair
+        end
+    end
+    if not next(instances) then return {}, "Dungeon data is unavailable from AtlasLoot or Forever Dungeon Journal." end
+    local matches = {}
+    if instances[key] then
+        matches[1] = instances[key]
+    else
+        for instanceKey, instance in pairs(instances) do
+            if (key ~= "dm" and instanceKey:find(key, 1, true)) or (key == "dm"
+                and (instanceKey:find("deadmines", 1, true) or instanceKey:find("diremaul", 1, true))) then
+                matches[#matches + 1] = instance
+            end
+        end
+    end
+    if #matches == 0 then return {}, "No matching dungeons or raids." end
+    table.sort(matches, function(left, right) return left.name < right.name end)
+    local journalItems = {}
+    for index, pair in ipairs(matches) do matches[index] = MergeInstance(pair, journal, journalItems) end
+    local label = #matches == 1 and matches[1].name:gsub("|", "||") or ("%d matching instances"):format(#matches)
+    if #matches == 1 and matches[1].level then label = label .. " · Levels " .. matches[1].level end
+    local groups, qualities, waiting = {}, {}, {}
+    for _, instance in ipairs(matches) do
+        local ordered = {}
+        for _, group in pairs(instance.groups) do ordered[#ordered + 1] = group end
+        table.sort(ordered, function(left, right)
+            if left.order == right.order then return left.name < right.name end
+            return left.order < right.order
+        end)
+        for _, group in ipairs(ordered) do
+            local title = group.name .. (group.level and (" · Lv " .. group.level) or "")
+            local instanceTitle = instance.name .. (instance.level and (" · Levels " .. instance.level) or "")
+            groups[#groups + 1] = {
+                title = #matches == 1 and title or (instanceTitle .. " · " .. title),
+                loot = group.loot,
+            }
+            for id in pairs(group.loot) do
+                if not addon.IsPTRItem(id) and qualities[id] == nil and not waiting[id] then
+                    qualities[id] = InstanceItemQuality(id, journalItems[id])
+                    if qualities[id] == nil then waiting[id] = true end
+                end
+            end
+        end
+    end
+
+    local function BuildResults(status)
+        local sections = {}
+        for _, group in ipairs(groups) do
+            local eligible = {}
+            for id in pairs(group.loot) do
+                if qualities[id] then eligible[id] = true end
+            end
+            if next(eligible) then
+                sections[#sections + 1] = { title = group.title, rows = LootRows(eligible, qualities, journalItems) }
+            end
+        end
+        local first = table.remove(sections, 1)
+        local hint = first and ("Loot from " .. label) or ("No matching loot for " .. label .. ".")
+        if status then hint = hint .. " · " .. status end
+        if not first then return {}, hint end
+        sections.title = first.title
+        return first.rows, hint, nil, nil, sections
+    end
+
+    if not next(waiting) then return BuildResults() end
+    if not C_Item.RequestLoadItemDataByID then return BuildResults("Some item data is unavailable") end
+    local rows, hint, _, _, sections = BuildResults("Checking item quality")
+    return rows, hint, function(done)
+        local timer, attempts = nil, 0
+        local function Check()
+            for id in pairs(waiting) do
+                qualities[id] = InstanceItemQuality(id, journalItems[id])
+                if qualities[id] ~= nil then waiting[id] = nil end
+            end
+            attempts = attempts + 1
+            if next(waiting) and attempts < 10 then
+                timer = C_Timer.NewTimer(0.15, Check)
+            else
+                done(BuildResults(next(waiting) and "Some item data is unavailable"))
+            end
+        end
+        for id in pairs(waiting) do pcall(C_Item.RequestLoadItemDataByID, id) end
+        timer = C_Timer.NewTimer(0.15, Check)
+        return function() timer:Cancel() end
+    end, nil, sections
+end
+
+function addon.SearchBossLoot(query, exactOnly)
+    local ok, _, bosses = pcall(AtlasIndex)
+    if not ok or not bosses or #bosses == 0 then return nil, "AtlasLoot boss data is unavailable." end
+    local matches = FindBossMatches(bosses, query, exactOnly)
+    if #matches == 0 then return nil, "No matching bosses." end
+    local loot = {}
+    for _, boss in ipairs(matches) do
+        for id in pairs(boss.loot) do loot[id] = true end
+    end
+    local results = LootRows(loot)
     if #matches == 1 then return results, "Drops from " .. matches[1].name end
     return results, ("Drops from %d matching bosses"):format(#matches)
+end
+
+local function HasID(ids, wanted)
+    for _, id in ipairs(ids or {}) do
+        if id == wanted then return true end
+    end
+    return false
+end
+
+function addon.SearchTargetLoot()
+    local guid = UnitGUID("target")
+    if issecretvalue and issecretvalue(guid) then return {}, "Target details are unavailable." end
+    local kind, id
+    if guid then kind, id = guid:match("^(%a+)%-[^-]+%-[^-]+%-[^-]+%-[^-]+%-(%d+)%-") end
+    if kind ~= "Creature" and kind ~= "Vehicle" then return {}, "Select an NPC to look up its drops." end
+    local npcID = tonumber(id)
+    local name = Clean(UnitName("target"))
+    local targetLabel = name and name ~= "" and name:gsub("|", "||") or ("NPC %d"):format(npcID)
+    local title = "Drops from " .. targetLabel
+    local loot = {}
+    local ok, _, bosses = pcall(AtlasIndex)
+    if not ok then bosses = nil end
+    local nameKey = name and name:lower()
+    for _, boss in ipairs(bosses or {}) do
+        if boss.isEncounter and (HasID(boss.npcIDs, npcID) or (not boss.npcIDs and boss.key == nameKey)) then
+            for itemID in pairs(boss.loot) do loot[itemID] = true end
+        end
+    end
+
+    local function Finish()
+        local rows = LootRows(loot)
+        return rows, #rows > 0 and title or ("No indexed drops for " .. targetLabel .. ".")
+    end
+
+    local db = _G.LibQuestieDB
+    local items = db and db.Item
+    if not (items and items.Get and items.GetAllIds) then
+        if not next(loot) then return {}, "No AtlasLoot match. QuestieDB can look up ordinary NPC drops." end
+        return Finish()
+    end
+    local idsOK, ids = pcall(items.GetAllIds)
+    if not idsOK or type(ids) ~= "table" or #ids == 0 then return Finish() end
+
+    return LootRows(loot), title .. " · Checking QuestieDB", function(done)
+        local timer
+        local first = 1
+        local function Step()
+            local last = math.min(first + 249, #ids)
+            for index = first, last do
+                local itemID = ids[index]
+                local readOK, sources = pcall(items.Get, itemID, "npcDrops")
+                if readOK and type(sources) == "table" and HasID(sources, npcID) then
+                    loot[itemID] = true
+                end
+            end
+            if last == #ids then
+                done(Finish())
+            else
+                first = last + 1
+                timer = C_Timer.NewTimer(0, Step)
+            end
+        end
+        timer = C_Timer.NewTimer(0, Step)
+        return function() timer:Cancel() end
+    end
 end
 
 local QUESTIE_FIELDS = {

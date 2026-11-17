@@ -1,3 +1,13 @@
+## Quick Item Search 0.4.0
+
+- With What's Training enabled, search `warlock 12` or `warrior 10` for spells unlocked at that exact level. Results distinguish trainer spells from quest rewards, with quest sources on hover.
+- Browse any class with `spells warlock` or `warlock spell`. Class spell sections work without What's Training; enabling it adds known unlock levels and sources.
+- Use `@target` for your current NPC's indexed drops or `@me` for gear around your level that matches your learned proficiencies.
+- Use `@dungeon` or `@instance` with a full or partial dungeon name, or a common abbreviation such as `hot` or `brd`. Inside a dungeon or raid, omit the name to search the current instance.
+- Dungeon results combine AtlasLoot and Forever Dungeon Journal where available. Loot is grouped by boss and Trash, with known boss levels and the dungeon level range. Results show rare-or-better items and uncommon-or-better recipes.
+- Open **History** from the pocket-watch icon to rerun one of your 10 most recent searches. Open **Examples** from the book icon for sample queries and quick-insert buttons with hover tips.
+- Use `wep` or `weapons` to find one-handed and two-handed melee weapons in one search.
+
 ## Quick Item Search 0.3.2
 
 - Drag the bottom-right corner to set the search window width and the maximum number of visible result rows. The window fits smaller result sets and opens at its compact height when the search is empty.

@@ -265,12 +265,38 @@ end
 function addon.Search(input)
     local query = input:match("^%s*(.-)%s*$")
     local lowerQuery = query:lower()
-    local shortcut, instanceQuery = lowerQuery:match("^(@%a+)%s+(.*)$")
+    if addon.SearchClassSpellUnlocks then
+        local rows, hint, load, title = addon.SearchClassSpellUnlocks(lowerQuery)
+        if rows then
+            local function WithSection(entries, message)
+                return entries, message, nil, nil, title and #entries > 0 and { title = title } or nil
+            end
+            if load then
+                return rows, hint, function(done)
+                    return load(function(entries, message) done(WithSection(entries, message)) end)
+                end, nil, title and #rows > 0 and { title = title } or nil
+            end
+            return WithSection(rows, hint)
+        end
+    end
+    if lowerQuery == "@target" then return addon.SearchTargetLoot() end
+    local shortcut, instanceQuery = lowerQuery:match("^(@?%a+)%s+(.*)$")
     shortcut = shortcut or lowerQuery
+    local petShortcut = shortcut:gsub("^@", "")
+    if petShortcut == "petspell" or petShortcut == "petspells" then
+        local target = instanceQuery or ""
+        return addon.SearchPetSpells(target:match('^"(.*)"$') or target)
+    end
     if shortcut == "@spell" or shortcut == "@spells" then
         local target = instanceQuery or ""
         return addon.SearchPlayerSpells(target:match('^"(.*)"$') or target)
     end
+    if shortcut == "@dungeon" or shortcut == "@instance" then
+        return addon.SearchInstanceLoot(instanceQuery or "")
+    end
+    local playerGear = (lowerQuery == "my gear" or lowerQuery == "@me") and ""
+        or lowerQuery:match("^my%s+gear%s+(.+)$") or lowerQuery:match("^@me%s+(.+)$")
+    if playerGear then return addon.SearchGear(playerGear, false, false, nil, true) end
     local id = ParseID(query)
     if id then
         if addon.IsPTRItem(id) then return {}, "This item is marked PTR Only." end
