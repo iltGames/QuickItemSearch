@@ -4,9 +4,15 @@ Press Ctrl+Shift+Space to open search when the chord is free. To change it, open
 
 Use `/qis` to open search or `/qis linen cloth` to open it with a query. `/itemsearch` is also available.
 
+Click the book icon beside the search box for **Examples**. Use **Target**, **Me**, or **Dungeon** to insert a shortcut, or add a level, boss, stat, or crafted filter. The pocket-watch icon opens **History**, which keeps your 10 most recent searches that you ran from a menu or slash command, confirmed with Enter, opened a result for, or left in the box when closing the window. Click a query in either menu to run it.
+
 Search by English item name, numeric ID, or pasted item link. Use Up and Down to browse results, scroll one row at a time with the mouse wheel, or drag the scrollbar on longer lists. Press Enter to activate an arrow-selected result or leave the search field after typing. Out of combat, you can keep using the arrows and Enter after activating a result. Hover for a tooltip, click to inspect, Shift-click to insert a link into open chat, or Ctrl-click to try on supported equipment. Escape closes the search overlay. Drag the bottom-right corner to resize the overlay. The window width and maximum number of visible rows are saved between sessions.
 
 With AtlasLoot Classic Forever enabled, search for a boss by name to see its loot. Use `boss:<name>` to prioritize the boss's loot. Items marked **PTR Only** in the bundled client data are filtered out.
+
+Target an NPC and type `@target` to see its indexed drops from AtlasLoot and QuestieDB. The results update when you switch targets while that query is open.
+
+Use `@dungeon krol'dok` or `@instance Blackrock Depths` to see loot from AtlasLoot and Forever Dungeon Journal. Drops are grouped by boss, with a separate Trash section when available. The summary shows the instance level range and boss headings show levels when known. Results show rare-or-better items and uncommon-or-better recipes. You can use part of the name or common abbreviations such as `hot` for Hall of Thanes and `brd` for Blackrock Depths. `dm` includes both Deadmines and Dire Maul. With no name, either shortcut looks up the dungeon or raid you are currently inside.
 
 Search keywords such as `spell`, `craft`, `gather`, and `train` can go before, after, or between the words of the search. Try `arcanite craft transmute`, `rich mine thorium vein`, or `where can I first train aid 225?`. Use quotes around names that contain a keyword.
 
@@ -43,6 +49,10 @@ Put `train` before or after the profession. Try `bs train`, `bs train 225`, or `
 `Trainer` works too, as in `alchemy trainer`, `smithing trainer 225`, or `leather working trainer`.
 
 ### Gear search
+
+Use `wep`, `weps`, `weapon`, or `weapons` for both one-handed and two-handed melee weapons. Add `1h` or `2h` to narrow the search, or use `@me wep` to apply your character's level and proficiencies.
+
+Try `@me` or `my gear` to find gear around your character's current level. The search uses your configured level offsets and learned armor and weapon proficiencies. Narrow it with the same gear filters, such as `@me chest`, `@me 1h`, or `my gear rings with stamina`. Check item tooltips for individual requirements such as class, faction, or reputation.
 
 Use the same search box to combine equipment slots, character levels, and item stats.
 

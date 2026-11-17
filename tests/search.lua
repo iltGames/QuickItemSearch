@@ -304,11 +304,26 @@ local encounters = {
     { name = "Test Boss", [1] = { { 1, 1 }, { 2, 4 }, { 3, 7 } } },
     { name = "Trash", ExtraList = true, [1] = { { 1, 3 } } },
 }
-local atlas = { Dungeon = { items = encounters } }
+local instanceAtlas = {
+    Dungeon = { name = "Dungeon", items = encounters },
+    Stronghold = { name = "Krol'dok Stronghold", items = {
+        { name = "First Boss", [1] = { { 1, 1 }, { 2, 7 }, { 3, 4 } } },
+        { name = "Second Boss", [1] = { { 1, 1 }, { 2, 2 } } },
+        { name = "Trash Mobs", ExtraList = true, [1] = { { 1, 3 }, { 2, 5 }, { 3, 6 } } },
+        { name = "Trash", ExtraList = true, [1] = { { 1, 3 } } },
+        { name = "Extras", ExtraList = true, [1] = { { 1, 1 } } },
+    } },
+    Empty = { name = "Empty Keep", items = { { name = "Unknown", [1] = {} } } },
+    Thanes = { name = "The Hall of Thanes", items = { { name = "Thane", [1] = { { 1, 1 } } } } },
+    Depths = { name = "Blackrock Depths", items = { { name = "Emperor", [1] = { { 1, 2 } } } } },
+    Deadmines = { name = "The Deadmines", items = { { name = "Captain", [1] = { { 1, 1 } } } } },
+    DireMaul = { name = "Dire Maul East", items = { { name = "Alzzin", [1] = { { 1, 2 } } } } },
+}
+local atlas = { Dungeon = instanceAtlas.Dungeon }
 AtlasLoot = { ItemDB = {
     Get = function() return atlas end,
-    GetNameData_UNSAFE = function(_, _, _, boss) return "Dungeon", encounters[boss].name end,
-    GetItemTable = function(_, _, _, boss, difficulty) return encounters[boss][difficulty], { "Item" } end,
+    GetNameData_UNSAFE = function(_, _, key, boss) return atlas[key].name, atlas[key].items[boss].name end,
+    GetItemTable = function(_, _, key, boss, difficulty) return atlas[key].items[boss][difficulty], { "Item" } end,
 } }
 LibQuestieDB = {
     Item = { Get = function(id, field) if id == 2 and field == "questRewards" then return { 123 } end end },
@@ -322,6 +337,116 @@ matches('2h rare boss:"Test Boss"', 1)
 matches("rare boss:test", 1)
 matches("rare boss:trash")
 matches("boss:Test Boss", 1, 4)
+atlas = instanceAtlas
+local instanceQuality = { [1] = 3, [2] = 4, [3] = 2, [4] = 2, [5] = 2, [6] = 1, [7] = 4 }
+C_Item.GetItemQualityByID = function(id) return instanceQuality[id] end
+C_Item.GetItemInfoInstant = function(id)
+    return id, nil, nil, nil, nil, (id == 3 or id == 6) and 9 or 4
+end
+local lootRows, _, _, _, lootSections = addon.Search("@dungeon krol'drok")
+assert(#lootRows == 1 and lootRows[1].id == 1 and lootSections.title == "First Boss")
+assert(#lootSections == 2 and lootSections[1].title == "Second Boss")
+assert(#lootSections[1].rows == 2 and lootSections[1].rows[2].id == 2)
+assert(lootSections[2].title == "Trash" and #lootSections[2].rows == 1 and lootSections[2].rows[1].id == 3)
+instanceQuality[5] = nil
+local requested, pendingQuality
+C_Item.RequestLoadItemDataByID = function(id) requested = id end
+C_Timer = { NewTimer = function(_, callback)
+    pendingQuality = callback
+    return { Cancel = function() pendingQuality = nil end }
+end }
+local _, qualityHint, loadQuality = addon.Search("@dungeon krol'dok")
+assert(qualityHint:find("Checking item quality", 1, true) and loadQuality)
+local cancelQuality = loadQuality(function() error("Cancelled dungeon search must not publish results") end)
+assert(requested == 5 and pendingQuality)
+cancelQuality()
+assert(not pendingQuality)
+loadQuality(function(_, _, _, _, sections)
+    assert(sections[2].title == "Trash" and #sections[2].rows == 2)
+end)
+instanceQuality[5] = 4
+pendingQuality()
+instanceQuality[5] = 2
+C_Item.RequestLoadItemDataByID, C_Timer = nil, nil
+matches("@dungeon hot", 1)
+matches("@instance BRD", 2)
+local _, _, _, _, dmSections = addon.Search("@dungeon dm")
+assert(dmSections.title == "Dire Maul East · Alzzin")
+assert(dmSections[1].title == "The Deadmines · Captain")
+matches('@instance "Krol’dok Stronghold"', 1)
+ForeverDungeonJournal_NS = {
+    BOSS_LEVELS = { ["Krol'dok Stronghold"] = { ["First Overseer"] = "43" } },
+    DB = {
+        ["Krol'dok Stronghold"] = { level = "40-47", bosses = {
+            { name = "First Overseer", aliases = { "First Boss" }, loot = { { 1 }, { 2 } } },
+            { name = "Trash Drops", trash = true, loot = { { 2 }, { 3 } } },
+        } },
+        ["Journal Keep"] = { level = "20-25", bosses = {
+            { name = "Journal Boss", level = 24, loot = { { 50001, "Journal Blade", "Sword", 3 } } },
+        } },
+    },
+}
+local merged, mergedHint, _, _, mergedSections = addon.Search("@dungeon krol'dok")
+assert(mergedHint == "Loot from Krol'dok Stronghold · Levels 40-47")
+assert(mergedSections.title == "First Boss · Lv 43" and #merged == 2 and merged[2].id == 2)
+assert(mergedSections[2].title == "Trash" and #mergedSections[2].rows == 2)
+local journalOnly, _, _, _, journalSections = addon.Search("@instance journal keep")
+assert(journalOnly[1].name == "Journal Blade" and journalSections.title == "Journal Boss · Lv 24")
+ForeverDungeonJournal_NS = nil
+local _, instanceHint = matches("@dungeon empty")
+assert(instanceHint == "No matching loot for Empty Keep.")
+GetInstanceInfo = function() return "Krol'dok Stronghold", "party" end
+matches("@dungeon", 1)
+GetInstanceInfo = function() return "Riverglades", "none" end
+_, instanceHint = matches("@instance")
+assert(instanceHint:find("Enter a dungeon name", 1, true))
+encounters[1].npcID = { 1234, 1235 }
+atlas = { Dungeon = { name = "Dungeon", items = encounters } }
+local targetGUID
+UnitGUID = function(unit) assert(unit == "target"); return targetGUID end
+UnitName = function() return "Test Boss" end
+local _, targetHint = matches("@target")
+assert(targetHint == "Select an NPC to look up its drops.")
+targetGUID = "Player-1-1234"
+_, targetHint = matches("@target")
+assert(targetHint == "Select an NPC to look up its drops.")
+targetGUID = "Creature-0-1-2-3-1235-0000123456"
+matches(" @TARGET ", 1, 4)
+targetGUID = "Creature-0-1-2-3-9876-0000123456"
+matches("@target")
+targetGUID = "Creature-0-1-2-3-1234-0000123456"
+local itemDB = LibQuestieDB.Item
+itemDB.GetAllIds = function() return { 1, 2, 3, 7 } end
+local getItem = itemDB.Get
+itemDB.Get = function(id, field)
+    if field == "npcDrops" then return (id == 1 or id == 2 or id == 7) and { 1234 } or { 9876 } end
+    return getItem(id, field)
+end
+local scheduled
+C_Timer = { NewTimer = function(_, callback)
+    scheduled = callback
+    return { Cancel = function() scheduled = nil end }
+end }
+local initial, _, loadTarget = addon.Search("@target")
+assert(#initial == 2 and loadTarget)
+local final
+local cancelTarget = loadTarget(function(rows) final = rows end)
+cancelTarget()
+assert(not scheduled and not final, "Cancelled target lookup must not replace results")
+loadTarget(function(rows) final = rows end)
+while scheduled do
+    local step = scheduled
+    scheduled = nil
+    step()
+end
+assert(#final == 3 and final[1].id == 1 and final[2].id == 4 and final[3].id == 2)
+targetGUID = "Creature-0-1-2-3-9876-0000123456"
+initial, _, loadTarget = addon.Search("@target")
+assert(#initial == 0 and loadTarget, "QuestieDB lookup must work for a target outside AtlasLoot")
+loadTarget(function(rows) final = rows end)
+scheduled()
+assert(#final == 1 and final[1].id == 3, "Ordinary NPC drops must match the target ID")
+C_Timer = nil
 matches("2h quest", 2)
 matches('quest:"Test Quest" rare', 2)
 matches("rare quest:123", 2)
@@ -415,4 +540,46 @@ assert(bundled.Search("craft arcanite transmute alch")[1].id == 17187)
 local gloveEnchants = bundled.Search("craft gloves enchanting")
 assert(#gloveEnchants > 0, "Crafting with Enchanting should find glove recipes")
 for _, row in ipairs(gloveEnchants) do assert(row.profession == "Enchanting") end
-print("Search keyword order, gear and source filters, and recipe requirements passed.")
+addon.index[20001], addon.index[20002], addon.index[20003] = "Test Axe", "Test Sword", "Test Old Axe"
+addon.index[20004], addon.index[20005], addon.index[20006] = "Test Cloth", "Test Mail", "Test Ring"
+addon.gear = {
+    [20001] = { 17, 20, 0, 3, 1 }, [20002] = { 17, 20, 0, 3, 1 },
+    [20003] = { 17, 14, 0, 3, 1 }, [20004] = { 5, 22, 0, 3, 1 },
+    [20005] = { 5, 20, 0, 3, 1 }, [20006] = { 11, 20, 0, 3, 1 },
+}
+local types = {
+    [20001] = { 2, 1 }, [20002] = { 2, 8 }, [20003] = { 2, 1 },
+    [20004] = { 4, 1 }, [20005] = { 4, 3 }, [20006] = { 4, 0 },
+}
+C_Item.GetItemInfoInstant = function(id)
+    return nil, nil, nil, nil, nil, unpack(types[id])
+end
+QuickItemSearchSettings = nil
+UnitLevel = function(unit) assert(unit == "player"); return 20 end
+local learned = { [172] = 1 }
+C_SkillInfo = { GetSkillLineInfoByID = function(id) return { rank = learned[id] or 0 } end }
+matches("my gear 2h", 20001)
+matches("@me 2h", 20001)
+matches("wep", 20001, 20003, 20002)
+matches("my gear chest", 20004)
+matches("my gear rings", 20006)
+learned[55], learned[413] = 1, 1
+matches("my gear 2h rare", 20001, 20002)
+matches("my gear chest", 20005, 20004)
+matches("2h lvl 20", 20001, 20002)
+assert(addon.SetLevelWindow(6, 0))
+matches("my gear 2h", 20003, 20001, 20002)
+matches("my gear chest", 20005)
+matches("@me chest", 20005)
+addon.index[20007] = "Test Dagger"
+addon.gear[20007] = { 13, 20, 0, 3, 1 }
+types[20007] = { 2, 15 }
+learned[173] = 1
+matches("@me wep", 20003, 20001, 20007, 20002)
+matches("@me weapons", 20003, 20001, 20007, 20002)
+matches("@me 1h wep", 20007)
+matches("@me 2h weps", 20003, 20001, 20002)
+C_SkillInfo = nil
+local _, playerHint = matches("my gear rings")
+assert(playerHint == "Character proficiencies are unavailable.")
+print("Search keyword order, gear, player proficiencies, source filters, and recipe requirements passed.")

@@ -265,6 +265,15 @@ end
 function addon.Search(input)
     local query = input:match("^%s*(.-)%s*$")
     local lowerQuery = query:lower()
+    if lowerQuery == "@target" then return addon.SearchTargetLoot() end
+    local shortcut, instanceQuery = lowerQuery:match("^(@%a+)%s+(.*)$")
+    shortcut = shortcut or lowerQuery
+    if shortcut == "@dungeon" or shortcut == "@instance" then
+        return addon.SearchInstanceLoot(instanceQuery or "")
+    end
+    local playerGear = (lowerQuery == "my gear" or lowerQuery == "@me") and ""
+        or lowerQuery:match("^my%s+gear%s+(.+)$") or lowerQuery:match("^@me%s+(.+)$")
+    if playerGear then return addon.SearchGear(playerGear, false, false, nil, true) end
     local id = ParseID(query)
     if id then
         if addon.IsPTRItem(id) then return {}, "This item is marked PTR Only." end

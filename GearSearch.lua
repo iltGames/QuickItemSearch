@@ -47,7 +47,7 @@ local slotAliases = {
 }
 for alias, slot in pairs(slotAliases) do slots[alias] = slots[slot] end
 
-local ARMOR_CLASS = 4
+local WEAPON_CLASS, ARMOR_CLASS = 2, 4
 local armorTypes = {
     cloth = { "Cloth", 1 }, leather = { "Leather", 2 },
     mail = { "Mail", 3 }, plate = { "Plate", 4 },
@@ -59,9 +59,42 @@ local function MatchesArmorType(id, armorType)
     return classID == ARMOR_CLASS and subclassID == armorType[2]
 end
 
+-- Item subclass IDs mapped to the corresponding character skill lines.
+local weaponSkills = {
+    [0] = 44, [1] = 172, -- Axes
+    [2] = 45, [3] = 46, -- Bows and guns
+    [4] = 54, [5] = 160, -- Maces
+    [6] = 229, [7] = 43, [8] = 55, -- Polearms and swords
+    [10] = 136, [13] = 473, [15] = 173, -- Staves, fist weapons, daggers
+    [16] = 176, [18] = 226, [19] = 228, [20] = 356, -- Thrown, crossbows, wands, fishing poles
+}
+local armorSkills = {
+    [2] = 414, [3] = 413, [4] = 293, [6] = 433, -- Leather, mail, plate, shields
+}
+
+local function PlayerProficiencyFilter(getSkill)
+    local learned = {}
+    return function(id)
+        local _, _, _, _, _, classID, subclassID = C_Item.GetItemInfoInstant(id)
+        if classID == ARMOR_CLASS and (subclassID == 0 or subclassID == 1) then
+            return true -- Miscellaneous armor and cloth.
+        end
+        local skillID = classID == WEAPON_CLASS and weaponSkills[subclassID]
+            or classID == ARMOR_CLASS and armorSkills[subclassID]
+        if not skillID then return false end
+        if learned[skillID] == nil then
+            local skill = getSkill(skillID)
+            learned[skillID] = skill and (skill.rank or 0) > 0 or false
+        end
+        return learned[skillID]
+    end
+end
+
 local oneHanded = { label = "One-handed weapons", [13] = true, [21] = true, [22] = true }
 local twoHanded = { label = "Two-handed weapons", [17] = true }
+local meleeWeapons = { label = "Melee weapons", [13] = true, [17] = true, [21] = true, [22] = true }
 local weaponSlots = {
+    wep = meleeWeapons, weps = meleeWeapons, weapon = meleeWeapons, weapons = meleeWeapons,
     ["1h"] = oneHanded, ["one-handed"] = oneHanded, onehanded = oneHanded, ["one handed"] = oneHanded,
     ["2h"] = twoHanded, ["two-handed"] = twoHanded, twohanded = twoHanded, ["two handed"] = twoHanded,
 }
@@ -279,6 +312,7 @@ end
 
 local function Describe(filters)
     local parts = {}
+    if filters.playerGear then parts[#parts + 1] = "My gear" end
     if filters.slot then parts[#parts + 1] = filters.slot.label end
     if filters.armorType then parts[#parts + 1] = filters.armorType[1] end
     if filters.rarity then parts[#parts + 1] = filters.rarity[1] end
@@ -300,13 +334,26 @@ local function Describe(filters)
     return table.concat(parts, " · ")
 end
 
-function addon.SearchGear(query, requireCombinedBoss, craftedOnly, profession)
-    local filters = ParseGearQuery(query)
+function addon.SearchGear(query, requireCombinedBoss, craftedOnly, profession, playerGear)
+    local filters = playerGear and query == "" and {} or ParseGearQuery(query)
+    if not filters and playerGear then return {}, "Try my gear chest, my gear rings, or my gear 1h." end
     if not filters then return end
     if requireCombinedBoss and not (filters.slot or filters.armorType or filters.level or filters.maxLevel or filters.quest
         or filters.crafted or filters.rarity or filters.binding or filters.stat) then return end
     if craftedOnly then filters.crafted = true end
     filters.profession = profession
+    local matchesProficiency
+    if playerGear then
+        local getSkill = C_SkillInfo and C_SkillInfo.GetSkillLineInfoByID
+        if not getSkill or not (C_Item and C_Item.GetItemInfoInstant) then
+            return {}, "Character proficiencies are unavailable."
+        end
+        if filters.level or filters.maxLevel then return {}, "My gear uses your character level." end
+        local level = UnitLevel("player")
+        if not level or level < 1 then return {}, "Character level is unavailable." end
+        filters.playerGear, filters.level = true, level
+        matchesProficiency = PlayerProficiencyFilter(getSkill)
+    end
     if filters.level then
         if filters.level < 1 or filters.level > 999 then return {}, "Enter a positive character level from 1 to 999." end
         local below, above = addon.GetLevelWindow()
@@ -401,6 +448,7 @@ function addon.SearchGear(query, requireCombinedBoss, craftedOnly, profession)
             and (not filters.rarity or gear[4] == filters.rarity[2])
             and (not filters.binding or gear[5] == filters.binding[2])
             and (not filters.maxLevel or (level >= filters.minLevel and level <= filters.maxLevel))
+            and (not matchesProficiency or matchesProficiency(id))
             and MatchesCraft(id)
             and (not filters.armorType or MatchesArmorType(id, filters.armorType))
             and (not bossDrops or bossDrops[id])
