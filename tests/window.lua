@@ -22,6 +22,9 @@ end
 function methods:IsShown() return self.shown end
 function methods:SetShown(shown) self.shown = shown end
 function methods:SetSize(width, height) self.width, self.height = width, height end
+function methods:SetPoint(point, x, y)
+    if point == "TOPLEFT" and type(x) == "number" then self.left, self.top = x, y end
+end
 function methods:SetHeight(height) self.height = height end
 function methods:SetWidth(width) self.width = width end
 function methods:GetWidth() return self.width end
@@ -47,8 +50,9 @@ end
 methods.CreateTexture = Widget
 methods.CreateFontString = Widget
 function methods:GetName() return self.name end
-function CreateFrame(kind, name)
+function CreateFrame(kind, name, parent)
     local frame = Widget()
+    frame.parent = parent
     if name then _G[name], frame.name = frame, name end
     if kind == "Button" then
         resizeHandle = frame
@@ -123,6 +127,8 @@ end
 ClickButton("Examples")
 ExpectHeight(83, "opening the examples popup must preserve the main panel height")
 local fieldCount = 0
+local fieldRows = {}
+local exampleCount = 0
 for _, button in ipairs(buttons) do
     if button.text and button.tooltipText then
         button.scripts.OnEnter(button)
@@ -130,30 +136,49 @@ for _, button in ipairs(buttons) do
         button.scripts.OnLeave(button)
         assert(not GameTooltip:IsShown(), "leaving an insert button must hide its tooltip")
         fieldCount = fieldCount + 1
+        local row = fieldRows[button.top] or {}
+        row[#row + 1] = button
+        fieldRows[button.top] = row
+    end
+    if button.query and button:IsShown() then exampleCount = exampleCount + 1 end
+end
+assert(fieldCount == 8, "all eight insert buttons must have hover help")
+for _, row in pairs(fieldRows) do
+    local first, last = row[1], row[#row]
+    local popupWidth = first.parent.parent:GetWidth()
+    assert(first.left == popupWidth - last.left - last:GetWidth(), "insert rows must have equal side margins")
+    for i = 2, #row do
+        assert(row[i].left - row[i - 1].left - row[i - 1]:GetWidth() >= 6, "insert buttons need visible gaps")
     end
 end
-assert(fieldCount == 7, "all seven insert buttons must have hover help")
-ClickQuery("linen cloth")
-assert(lastQuery == "linen cloth", "clicking a query example must run it immediately")
+assert(exampleCount == 4, "the Examples popup must display exactly four queries")
+local upgradeExample = "@me shield upgrade no sp"
+local ringExample = "rings lvl 30-40 with agility near 10"
+local craftedExample = "crafted leather gloves lvl 40 with agility"
+ClickQuery(upgradeExample)
+assert(lastQuery == upgradeExample, "clicking a query example must run it immediately")
 ClickButton("History")
-ClickQuery("linen cloth")
+ClickQuery(upgradeExample)
 ClickButton("Examples")
 searchBox.scripts.OnArrowPressed(searchBox, "DOWN")
 searchBox.scripts.OnArrowPressed(searchBox, "DOWN")
 searchBox.scripts.OnEnterPressed(searchBox)
-assert(lastQuery == "@me chest", "keyboard selection must run the highlighted example")
+assert(lastQuery == ringExample, "keyboard selection must run the highlighted example")
 ClickButton("Examples")
-ClickQuery("train first aid 150")
-assert(lastQuery == "train first aid 150", "the expanded examples must include trainer lookup")
+ClickQuery(craftedExample)
+assert(lastQuery == craftedExample, "the examples must include a crafted gear query")
 searchBox:SetText("rare")
 ClickButton("Examples")
 ClickButton("Boss")
 assert(searchBox:GetText() == 'rare boss:""' and searchBox.cursor == 11)
-assert(lastQuery == "train first aid 150", "quick insertion must avoid explicitly running an unfinished query")
+assert(lastQuery == craftedExample, "quick insertion must avoid explicitly running an unfinished query")
 searchBox:SetText("chest")
 ClickButton("Examples")
 ClickButton("Me")
 assert(searchBox:GetText() == "@me chest")
+ClickButton("Examples")
+ClickButton("Upgrade")
+assert(searchBox:GetText() == "@me chest upgrade")
 searchBox:SetText("brd")
 ClickButton("Examples")
 ClickButton("Dungeon")
@@ -181,8 +206,9 @@ assert(QuickItemSearchFrame:IsShown(), "Escape must dismiss the popup before the
 searchBox:SetText("  linen cloth  ")
 searchBox.scripts.OnEnterPressed(searchBox)
 assert(QuickItemSearchSettings.history[1] == "linen cloth")
-assert(QuickItemSearchSettings.history[2] == "train first aid 150")
-assert(QuickItemSearchSettings.history[3] == "@me chest" and #QuickItemSearchSettings.history == 3)
+assert(QuickItemSearchSettings.history[2] == craftedExample)
+assert(QuickItemSearchSettings.history[3] == ringExample)
+assert(QuickItemSearchSettings.history[4] == upgradeExample and #QuickItemSearchSettings.history == 4)
 toggle("2")
 ExpectHeight(143, "two matches")
 toggle("50")

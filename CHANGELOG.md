@@ -1,3 +1,9 @@
+## Quick Item Search 0.4.6
+
+- Add `upgrade` to show gear with a higher item level than the equipped piece it could replace. Results show the item level and the increase.
+- Exclude an indexed stat with `no`, as in `@me shield upgrade no sp`.
+- Align the Examples popup's quick-insert buttons, add an Upgrade button, and show four queries that combine gear filters.
+
 ## Quick Item Search 0.4.5
 
 - Use `@d`, `@dung`, or `@inst` for dungeon loot, `@t` for target loot, and `@gear` for your character's gear.

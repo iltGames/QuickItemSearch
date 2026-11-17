@@ -16,10 +16,10 @@ local ARROW_DIRECTION = { UP = -1, DOWN = 1 }
 local HISTORY_LIMIT = 10
 local MAX_QUERY_BYTES = 512
 local queryExamples = {
-    "@target", "@me chest", "linen cloth", "rings from 10-12 with agility",
-    "@dungeon krol'dok", 'rare boss:"Edwin VanCleef"', "spell thorns",
-    "enchant gloves agi", "craft arcanite transmute", "usedin stranglekelp",
-    "gather stranglekelp", "train first aid 150", "skin 125",
+    "@me shield upgrade no sp",
+    "rings lvl 30-40 with agility near 10",
+    'rare boss:"Edwin VanCleef" with stamina',
+    "crafted leather gloves lvl 40 with agility",
 }
 local queryShortcuts = {
     { "Target", "@target", "Show your target's drops." },
@@ -31,6 +31,7 @@ local queryFields = {
     { "Boss", 'boss:""', "Filter drops by boss name.", 1 },
     { "Stat", "with ", "Add a stat, such as agility." },
     { "Crafted", "crafted", "Show only crafted gear." },
+    { "Upgrade", "upgrade", "Show gear with a higher item level than your equipped item." },
 }
 local COLORS = {
     panel = { 0.073, 0.066, 0.057, 0.98 },
@@ -675,8 +676,9 @@ end
 
 local function CreateQueryPopup()
     local rowHeight = 24
+    local popupWidth, fieldInset, fieldGap, fieldHeight = 378, 12, 6, 22
     queryPopup = CreateFrame("Frame", nil, frame, "BackdropTemplate")
-    queryPopup:SetWidth(310)
+    queryPopup:SetWidth(popupWidth)
     queryPopup:SetFrameStrata("FULLSCREEN_DIALOG")
     queryPopup:SetClampedToScreen(true)
     queryPopup:EnableMouse(true)
@@ -694,14 +696,16 @@ local function CreateQueryPopup()
     historySummary:SetText("Only showing the last " .. HISTORY_LIMIT .. " searches")
     historySummary:Hide()
 
-    local fieldsHeight = 72
+    local shortcutsTop = 26
+    local filtersTop = shortcutsTop + fieldHeight + fieldGap
+    local fieldsHeight = filtersTop + fieldHeight + fieldGap
     local fields = CreateFrame("Frame", nil, queryPopup)
     fields:SetPoint("TOPLEFT", 0, 0)
     fields:SetPoint("TOPRIGHT", 0, 0)
     fields:SetHeight(fieldsHeight)
     fields:Hide()
     local fieldsLabel = fields:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    fieldsLabel:SetPoint("TOPLEFT", 11, -8)
+    fieldsLabel:SetPoint("TOPLEFT", fieldInset, -8)
     fieldsLabel:SetText("Insert field")
     local function FillQuery(query, cursorOffset)
         if #query > MAX_QUERY_BYTES then return end
@@ -710,17 +714,18 @@ local function CreateQueryPopup()
         searchBox:SetFocus()
         searchBox:SetCursorPosition(#query - (cursorOffset or 0))
     end
-    local function AddFieldButton(label, description, x, y, width, onClick)
+    local function AddFieldButton(label, description, index, count, top, onClick)
+        local width = (popupWidth - 2 * fieldInset - (count - 1) * fieldGap) / count
         local button = CreateFrame("Button", nil, fields, "UIPanelButtonTemplate")
-        button:SetPoint("TOPLEFT", x, y)
-        button:SetSize(width, 21)
+        button:SetPoint("TOPLEFT", fieldInset + (index - 1) * (width + fieldGap), -top)
+        button:SetSize(width, fieldHeight)
         button:SetText(label)
         SetButtonTooltip(button, description)
         button:SetScript("OnClick", onClick)
     end
     for index, shortcut in ipairs(queryShortcuts) do
         local token = shortcut[2]
-        AddFieldButton(shortcut[1], shortcut[3], 7 + (index - 1) * 100, -22, 95, function()
+        AddFieldButton(shortcut[1], shortcut[3], index, #queryShortcuts, shortcutsTop, function()
             if token == "@target" then
                 FillQuery(token)
                 return
@@ -734,7 +739,7 @@ local function CreateQueryPopup()
         end)
     end
     for index, field in ipairs(queryFields) do
-        AddFieldButton(field[1], field[3], 7 + (index - 1) * 75, -47, 70, function()
+        AddFieldButton(field[1], field[3], index, #queryFields, filtersTop, function()
             local current = searchBox:GetText():gsub("%s+$", "")
             local prefix = current:find("%S") and current .. " " or ""
             FillQuery(prefix .. field[2], field[4])
