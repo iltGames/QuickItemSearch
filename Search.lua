@@ -268,6 +268,10 @@ function addon.Search(input)
     if lowerQuery == "@target" then return addon.SearchTargetLoot() end
     local shortcut, instanceQuery = lowerQuery:match("^(@%a+)%s+(.*)$")
     shortcut = shortcut or lowerQuery
+    if shortcut == "@spell" or shortcut == "@spells" then
+        local target = instanceQuery or ""
+        return addon.SearchPlayerSpells(target:match('^"(.*)"$') or target)
+    end
     if shortcut == "@dungeon" or shortcut == "@instance" then
         return addon.SearchInstanceLoot(instanceQuery or "")
     end

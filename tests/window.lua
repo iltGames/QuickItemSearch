@@ -197,4 +197,20 @@ assert(QuickItemSearchSettings.history[1] == "12" and QuickItemSearchSettings.hi
 ClickButton("History")
 ClickQuery("3")
 assert(lastQuery == "3", "the tenth history entry must be available in the popup")
+local tooltipLines = {}
+function GameTooltip:AddLine(line) tooltipLines[#tooltipLines + 1] = line end
+function addon.Search()
+    return { {
+        kind = "text",
+        name = "Bite (Rank 3)",
+        petTrainingLevel = 16,
+        tameSources = { { "Deepmoss Creeper", "Stonetalon Mountains", "16-17" } },
+    } }
+end
+toggle("@spell bite 3")
+for _, button in ipairs(buttons) do
+    if button.entry and button.entry.tameSources then button.scripts.OnEnter(button) end
+end
+assert(GameTooltip:IsShown() and tooltipLines[2] == "Requires pet level 16 to train.")
+assert(tooltipLines[4] == "Deepmoss Creeper - Stonetalon Mountains (Level 16-17)")
 print("Window sizing regression passed")

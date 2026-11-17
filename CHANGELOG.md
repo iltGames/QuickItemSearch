@@ -1,3 +1,7 @@
+## Quick Item Search 0.4.1
+
+- Search `@spell bite` for hunter pet abilities or `@spell bite 3` for a specific rank. Hover a result for the tameable beasts, their zones and wild levels, and the pet level required to train the ability.
+
 ## Quick Item Search 0.4.0
 
 - Use `@target` for your current NPC's indexed drops or `@me` for gear around your level that matches your learned proficiencies.
