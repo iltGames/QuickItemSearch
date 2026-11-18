@@ -92,8 +92,15 @@ local function AddQuestContacts(rows, db, groups, label)
     if type(groups) ~= "table" then return end
     for group, entity in ipairs({ "Npc", "Object", "Item" }) do
         for _, id in ipairs(groups[group] or {}) do
+            local contactName = group ~= 3 and Text(Read(db[entity], id, "name"))
             local row = group == 3 and ItemRow(db, id)
-                or { kind = "text", name = Text(Read(db[entity], id, "name")) or (entity .. " " .. id) }
+                or { kind = "text", name = contactName or (entity .. " " .. id) }
+            if group == 1 and contactName then
+                row.relatedQuery, row.relatedLabel = "@npc " .. id, "View NPC details"
+            elseif group == 2 and contactName then
+                row.relatedQuery, row.relatedLabel = "@object " .. id, "Show object locations"
+            end
+            if group ~= 3 then row.pinEntity, row.pinEntityID = entity, id end
             row.matchLabel = label
             rows[#rows + 1] = row
         end

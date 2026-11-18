@@ -34,6 +34,17 @@ local function GatheringRow(id, name, profession, skill, nodeName)
     }
 end
 
+function addon.GetGatheringNodes(itemID)
+    local name = addon.index[itemID]
+    local skill = herbs[itemID]
+    if skill and name then return { GatheringRow(itemID, name, "Herbalism", skill) } end
+    local rows = {}
+    for _, node in ipairs(ores[itemID] or {}) do
+        rows[#rows + 1] = GatheringRow(itemID, name, "Mining", node[2], node[1])
+    end
+    return rows
+end
+
 local function NameRank(name, target)
     if not name then return 0 end
     local key = name:lower()
@@ -497,18 +508,19 @@ local function TrainingRows(profession, currentSkill, includeProfession)
         if not currentSkill or currentSkill < rank.cap or rank == finalRank then
             local trainers = profession.trainers[index]
             if currentSkill and not trainers then trainers = profession.trainers[profession.sharedTrainerRank] end
-            local title = ("%s %s (up to %d)"):format(rank.name, profession.name, rank.cap)
+            local notes = {}
             if rank.skill then
                 local requiredSkill = rank == finalRank and profession.artisanSkill or rank.skill
-                local requirement = ("\nRequires %s %d"):format(profession.name, requiredSkill)
+                local requirement = ("Requires %s %d"):format(profession.name, requiredSkill)
                 if not profession.skillOnly then
                     requirement = requirement .. (" and character level %d"):format(rank.level)
                 end
-                title = title .. requirement .. "."
+                notes[#notes + 1] = requirement .. "."
             end
             if not currentSkill and index == profession.sharedTrainerRank then
-                title = title .. "\nThis trainer also teaches earlier ranks."
+                notes[#notes + 1] = "This trainer also teaches earlier ranks."
             end
+            local requirements = #notes > 0 and table.concat(notes, "\n") or nil
             for _, trainer in ipairs(trainers or {}) do
                 local faction, npc, location, instruction = unpack(trainer)
                 local prefix = instruction and (rank == finalRank and "Quest: " or "Book: ") or ""
@@ -517,7 +529,9 @@ local function TrainingRows(profession, currentSkill, includeProfession)
                     name = prefix .. npc .. " - " .. location,
                     matchLabel = ("%s%s %d / %s"):format(
                         includeProfession and (profession.name .. " ") or "", rank.name, rank.cap, faction),
-                    description = instruction and (title .. "\n" .. instruction) or title,
+                    description = requirements and (instruction and (requirements .. "\n" .. instruction) or requirements)
+                        or instruction,
+                    trainerName = not instruction and npc or nil,
                 }
             end
             if currentSkill then break end

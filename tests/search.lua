@@ -80,6 +80,9 @@ assert(source[1] == "Deepmoss Creeper" and source[2] == "Stonetalon Mountains" a
 assert(section("bite rank 3", "Spells")[1].name == "Bite (Rank 3)")
 local unknownRank = addon.Search("@spell lightning breath 1")
 assert(#unknownRank == 1 and #unknownRank[1].tameSources == 0, "Ranks with unknown sources stay searchable")
+local noTameSource = addon.GetResultRelatedQueries(unknownRank[1])
+assert(#noTameSource == 1 and noTameSource[1].name == "No known tame source for this rank."
+    and not noTameSource[1].query, "A rank with no known sources should still explain why its menu has no links")
 assert(matches("@spell 467", 467).kind == "spell")
 for _, alias in ipairs({ "petspell", "petspells", "@petspell", "@petspells" }) do
     local petRows = addon.Search(alias)
@@ -102,6 +105,44 @@ matches("stranglekelp usedin", 502, 501)
 matches("usedin strangle", 502, 501)
 matches("stranglekelp used in", 502, 501)
 matches("usedin 3820", 502, 501)
+do
+    local previous = LibQuestieDB
+    LibQuestieDB = {
+        Item = { Get = function(id, field)
+            if id == 3820 and field == "objectDrops" then return { 2045, 1 } end
+        end },
+        Object = { Get = function(id, field)
+            if field == "name" then return id == 2045 and "Stranglekelp" or "Chest" end
+            if field == "spawns" then return { [40] = { { 12.5, 34.5 } } } end
+        end },
+    }
+    local rows = addon.Search("@gather 3820")
+    assert(rows[1] and rows[1].name == "Stranglekelp" and rows[1].gatheringProfession == "Herbalism")
+    assert(rows[2].name == "Area 40" and rows[2].matchLabel == "12.5, 34.5")
+    assert(#rows == 2, "Gathering locations must exclude unrelated containers")
+    local choices = addon.GetResultRelatedQueries(rows[1])
+    assert(choices[2].query == "@gather 3820" and choices[2].name == "Show where to gather")
+    local sources = addon.Search("@sources 3820")
+    assert(sources[2].kind == "object" and sources[2].id == 1, "A container must remain in the full sources view")
+    assert(addon.Search("@object 2045")[1].name == "Area 40", "Object sources must open their locations")
+    local reagents = addon.Search("@recipe 501")
+    assert(reagents[1] and reagents[1].id == 3820, "Recipe details must show the linked recipe's reagents")
+    assert(addon.Search("@madeby 12360")[1].id == 17187, "Crafted items must link to their output recipe")
+    local getObject = LibQuestieDB.Object.Get
+    function LibQuestieDB.Object.Get(id, field)
+        if id == 2045 and field == "spawns" then
+            return { [40] = { { 1, 2 }, { 3, 4 }, { 5, 6 }, { 7, 8 }, { 9, 10 }, { 11, 12 }, { 13, 14 } } }
+        end
+        return getObject(id, field)
+    end
+    local zoneTooltip = addon.Search("@gather 3820")[2].description
+    assert(zoneTooltip:find("Showing 6 of 7 locations", 1, true) and not zoneTooltip:find("13.0, 14.0", 1, true),
+        "Gathering hover should identify the coordinate sample as a subset")
+    LibQuestieDB = nil
+    choices = addon.GetResultRelatedQueries(rows[1])
+    assert(choices[2].query == "@gather 3820" and choices[2].name == "Show gathering requirements")
+    LibQuestieDB = previous
+end
 matches("arcanite make transmute", 17187)
 matches("arcanite transmute make", 17187)
 matches("how do I make arcanite transmute?", 17187)
@@ -248,6 +289,7 @@ end
 local artisanTrainers = addon.Search("Where to train Alchemy 225?")
 assert(#artisanTrainers == 3)
 assert(artisanTrainers[1].description:find("Requires Alchemy 200 and character level 35", 1, true))
+assert(not artisanTrainers[1].description:find("up to 300", 1, true), "Trainer hovers should skip the rank cap shown on the row")
 assert(artisanTrainers[1].name == "Kylanna Windwhisper - Feathermoon Stronghold, Feralas")
 assert(artisanTrainers[2].name == "Rogvar - Stonard, Swamp of Sorrows")
 assert(artisanTrainers[3].name == "Master Mycologist Shurome - Emerald Sanctuary, Felwood")

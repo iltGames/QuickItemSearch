@@ -507,6 +507,57 @@ local QUESTIE_FIELDS = {
     { field = "questRewards", entity = "Quest", kind = "quest" },
 }
 
+local function ZoneName(id)
+    local name = C_Map and C_Map.GetAreaInfo and C_Map.GetAreaInfo(id)
+    if not name or name == "" then name = GetAreaInfo and GetAreaInfo(id) end
+    return name and name ~= "" and name or ("Area %d"):format(id)
+end
+
+local function ValidArea(id)
+    return type(id) == "number" and id > 0
+end
+
+local function GetEntityAreas(entity, id)
+    local spawns = entity.Get(id, "spawns") or {}
+    local areas, seenAreas = {}, {}
+    local function AddArea(area)
+        if ValidArea(area) and not seenAreas[area] then
+            seenAreas[area] = true
+            areas[#areas + 1] = { id = area, name = ZoneName(area) }
+        end
+    end
+    for area in pairs(spawns) do AddArea(area) end
+    for area in pairs(entity.Get(id, "waypoints") or {}) do AddArea(area) end
+    if #areas == 0 then AddArea(entity.Get(id, "zoneID")) end
+    table.sort(areas, function(left, right)
+        if left.name == right.name then return left.id < right.id end
+        return left.name < right.name
+    end)
+    return areas, spawns
+end
+
+function addon.GetEntityLocations(entity, id)
+    local areas, spawns = GetEntityAreas(entity, id)
+    local rows = {}
+    for _, area in ipairs(areas) do
+        local seen = {}
+        for _, point in ipairs(spawns[area.id] or {}) do
+            local x, y = point[1], point[2]
+            if type(x) == "number" and type(y) == "number" and x >= 0 and x <= 100 and y >= 0 and y <= 100 then
+                local label = ("%.1f, %.1f"):format(x, y)
+                if not seen[label] then
+                    rows[#rows + 1] = {
+                        kind = "text", name = area.name, matchLabel = label, areaID = area.id, x = x, y = y,
+                    }
+                    seen[label] = true
+                end
+            end
+        end
+        if not next(seen) then rows[#rows + 1] = { kind = "text", name = area.name, areaID = area.id } end
+    end
+    return rows
+end
+
 local function QuestieSources(itemID)
     local db = _G.LibQuestieDB
     if not db or not db.Item or not db.Item.Get then return end
@@ -524,12 +575,20 @@ local function QuestieSources(itemID)
             for _, id in ipairs(ids) do
                 local name = Clean(entity.Get(id, "name"))
                 if name and name ~= "" then
-                    local rate
+                    local rate, zone
                     if field.kind == "drop" and rates and rates.GetItemDroprate then
                         local observation = rates.GetItemDroprate(itemID, id)
                         rate = Rate(type(observation) == "table" and observation[1] or observation)
+                    elseif field.kind == "vendor" then
+                        local area = entity.Get(id, "zoneID")
+                        if ValidArea(area) then
+                            zone = ZoneName(area)
+                        else
+                            local location = addon.GetEntityLocations(entity, id)[1]
+                            zone = location and location.name
+                        end
                     end
-                    rows[#rows + 1] = { kind = field.kind, id = id, name = name, rate = rate }
+                    rows[#rows + 1] = { kind = field.kind, id = id, name = name, rate = rate, zone = zone }
                 end
             end
         end
@@ -538,7 +597,8 @@ local function QuestieSources(itemID)
 end
 
 local function SameSource(left, right)
-    if left.kind ~= right.kind or (left.zone and right.zone and left.zone ~= right.zone) then return false end
+    if left.kind ~= right.kind then return false end
+    if left.kind ~= "vendor" and left.zone and right.zone and left.zone ~= right.zone then return false end
     if left.id and right.id then return left.id == right.id end
     return left.name == right.name
 end
@@ -578,6 +638,174 @@ function addon.GetItemSources(itemID)
     AddRows(result, backup[itemID])
     if hasLiveSources then backup[itemID] = result end
     return result
+end
+
+local function SourceTitle(id)
+    return ((addon.index and addon.index[id]) or ("Item %d"):format(id)):gsub("|", "||")
+end
+
+function addon.SearchObjectLocations(id)
+    local objects = _G.LibQuestieDB and LibQuestieDB.Object
+    local name = objects and objects.Get and Clean(objects.Get(id, "name"))
+    if not name then return {}, "No indexed object locations." end
+    local rows = addon.GetEntityLocations(objects, id)
+    return rows, #rows > 0 and name:gsub("|", "||") or "No indexed locations for this object."
+end
+
+function addon.GetGatheringLocations(itemID, nodes)
+    local db = _G.LibQuestieDB
+    local areasByNode = {}
+    if not (db and db.Item and db.Item.Get and db.Object and db.Object.Get) then return areasByNode end
+    local names = {}
+    for _, node in ipairs(nodes) do names[(node.nodeName or node.name):lower()] = node end
+    for _, objectID in ipairs(db.Item.Get(itemID, "objectDrops") or {}) do
+        local name = Clean(db.Object.GetRaw and db.Object.GetRaw(objectID, "name"))
+            or Clean(db.Object.Get(objectID, "name"))
+        local node = name and names[name:lower()]
+        if node then
+            local locations = areasByNode[node] or {}
+            areasByNode[node] = locations
+            for _, location in ipairs(addon.GetEntityLocations(db.Object, objectID)) do
+                locations[#locations + 1] = location
+            end
+        end
+    end
+    return areasByNode
+end
+
+function addon.SearchGatheringLocations(itemID)
+    local nodes = addon.GetGatheringNodes(itemID)
+    if #nodes == 0 then return {}, "No indexed gathering requirements." end
+    local locations = addon.GetGatheringLocations(itemID, nodes)
+    local rows = {}
+    local found
+    for _, node in ipairs(nodes) do
+        rows[#rows + 1] = node
+        local zones, byID = {}, {}
+        for _, location in ipairs(locations[node] or {}) do
+            local zone = byID[location.areaID]
+            if not zone then
+                zone = { name = location.name, points = {}, seen = {} }
+                byID[location.areaID] = zone
+                zones[#zones + 1] = zone
+            end
+            local point = location.matchLabel
+            if point and not zone.seen[point] then
+                zone.points[#zone.points + 1] = point
+                zone.seen[point] = true
+            end
+        end
+        table.sort(zones, function(left, right) return left.name < right.name end)
+        for _, zone in ipairs(zones) do
+            local row = { kind = "text", name = zone.name, matchLabel = zone.points[1] }
+            local total = #zone.points
+            if total > 1 then
+                local shown = math.min(total, 6)
+                row.matchLabel = ("%s  +%d"):format(zone.points[1], total - 1)
+                local heading = shown < total and ("Showing %d of %d locations"):format(shown, total)
+                    or ("%d known locations"):format(total)
+                row.description = heading .. "\n" .. table.concat(zone.points, "\n", 1, shown)
+            end
+            rows[#rows + 1] = row
+        end
+        if #zones > 0 then found = true end
+    end
+    local title = "Gathering " .. SourceTitle(itemID)
+    if not found then title = title .. "\nNo indexed gathering locations." end
+    return rows, title
+end
+
+local sourceLabels = { drop = "Drop", vendor = "Vendor", object = "Object", container = "Container", quest = "Quest reward" }
+
+local function IsReadable(value)
+    return not (issecretvalue and issecretvalue(value)) and value ~= nil
+end
+
+local function WorldPosition(mapID, point)
+    if not IsReadable(point) then return end
+    local world, position = C_Map.GetWorldPosFromMapPos(mapID, point)
+    if not IsReadable(world) or not IsReadable(position) then return end
+    local x, y = position:GetXY()
+    if IsReadable(x) and IsReadable(y) then return world, x, y end
+end
+
+local function SortVendorRows(rows, vendors, db)
+    local playerZone = GetRealZoneText and GetRealZoneText()
+    if not IsReadable(playerZone) or playerZone == "" then playerZone = nil end
+    local playerMap = C_Map and C_Map.GetBestMapForUnit and C_Map.GetBestMapForUnit("player")
+    if not IsReadable(playerMap) then playerMap = nil end
+    if not playerZone and not playerMap then return end
+
+    local playerWorld, playerX, playerY, center
+    if playerMap and C_Map.GetPlayerMapPosition and C_Map.GetWorldPosFromMapPos and CreateVector2D then
+        playerWorld, playerX, playerY = WorldPosition(playerMap, C_Map.GetPlayerMapPosition(playerMap, "player"))
+        center = CreateVector2D(0.5, 0.5)
+    end
+
+    local ranks = {}
+    local function ZoneRank(area)
+        if ranks[area.id] then return ranks[area.id] end
+        local map = playerMap and addon.GetAreaMapID and addon.GetAreaMapID(db, area.id)
+        local rank = math.huge
+        if (map and map == playerMap) or area.name == playerZone then
+            rank = -1
+        elseif map and playerWorld then
+            local world, x, y = WorldPosition(map, center)
+            if world == playerWorld then rank = (x - playerX)^2 + (y - playerY)^2 end
+        end
+        ranks[area.id] = rank
+        return rank
+    end
+
+    local npcs = db and db.Npc
+    local slots = {}
+    for index, vendor in ipairs(vendors) do
+        slots[index] = vendor.slot
+        vendor.rank = math.huge
+        local areas = npcs and npcs.Get and vendor.id and GetEntityAreas(npcs, vendor.id) or {}
+        for _, area in ipairs(areas) do
+            local rank = ZoneRank(area)
+            if rank < vendor.rank then
+                vendor.rank, vendor.row.vendorZone = rank, area.name
+            end
+        end
+        if #areas == 0 and playerZone and vendor.row.vendorZone == playerZone then vendor.rank = -1 end
+    end
+    table.sort(vendors, function(left, right)
+        if left.rank == right.rank then return left.slot < right.slot end
+        return left.rank < right.rank
+    end)
+    for index, vendor in ipairs(vendors) do rows[slots[index]] = vendor.row end
+end
+
+function addon.SearchItemSources(itemID)
+    local db = _G.LibQuestieDB
+    local rows, vendors = {}, {}
+    for _, source in ipairs(addon.GetItemSources(itemID)) do
+        local label = sourceLabels[source.kind]
+        if label then
+            local id, kind = source.id, source.kind
+            if source.rate then label = ("%s · %.4g%%"):format(label, source.rate) end
+            if source.zone and kind ~= "vendor" then label = label .. " · " .. source.zone end
+            local row = { kind = "text", name = source.name, matchLabel = label }
+            if kind == "vendor" then
+                row.vendorZone = source.zone
+                vendors[#vendors + 1] = { row = row, id = id, slot = #rows + 1 }
+            end
+            if type(id) == "number" and id > 0 then
+                local target = (kind == "drop" or kind == "vendor") and db and db.Npc and "npc"
+                    or kind == "quest" and "quest" or kind == "object" and db and db.Object and "object"
+                if target then row.kind, row.id = target, id end
+                if kind == "container" and not addon.IsPTRItem(id) then row.kind, row.id = nil, id end
+            end
+            if row.kind == "text" and kind == "drop" and source.zone then
+                row.relatedQuery, row.relatedLabel = 'boss:"' .. source.name .. '"', "View boss loot"
+            end
+            rows[#rows + 1] = row
+        end
+    end
+    if #vendors > 0 and addon.IsVendorProximityEnabled() then SortVendorRows(rows, vendors, db) end
+    return rows, #rows > 0 and ("Sources for " .. SourceTitle(itemID)) or "No indexed sources for this item."
 end
 
 function addon.GetQuestRewardFilter(query)
@@ -698,74 +926,24 @@ local function IsQuestReward(source)
     return source.kind == "quest" and type(source.id) == "number" and source.id > 0
 end
 
-function addon.GetItemQuestChoices(itemID, includeRewards)
+function addon.GetItemQuestChoices(itemID, includeRewards, sources)
     local quests = addon.GetItemQuestRequirements(itemID)
     if not includeRewards then return quests end
 
     local seen = {}
-    for _, quest in ipairs(quests) do seen[quest.id] = true end
-    for _, source in ipairs(addon.GetItemSources(itemID)) do
-        if IsQuestReward(source) and not seen[source.id] then
-            quests[#quests + 1] = { id = source.id, name = source.name }
-            seen[source.id] = true
+    for _, quest in ipairs(quests) do seen[quest.id] = quest end
+    for _, source in ipairs(sources or addon.GetItemSources(itemID)) do
+        if IsQuestReward(source) then
+            local quest = seen[source.id]
+            if quest then
+                if not quest.reward then quest.required = true end
+                quest.reward = true
+            else
+                quest = { id = source.id, name = source.name, reward = true }
+                quests[#quests + 1] = quest
+                seen[source.id] = quest
+            end
         end
     end
     return quests
-end
-
-local function AppendQuestRequirements(tooltip, itemID)
-    local quests = addon.GetItemQuestRequirements(itemID)
-    if #quests == 0 then return false end
-    tooltip:AddLine(" ")
-    for i = 1, math.min(6, #quests) do
-        tooltip:AddLine("Required for quest: " .. (quests[i].name:gsub("|", "||")), 1, 0.82, 0, true)
-    end
-    if #quests > 6 then
-        tooltip:AddLine("Additional quest requirements omitted.", 0.71, 0.66, 0.57, true)
-    end
-    return true
-end
-
-local LABELS = { drop = "Drops from", object = "Found in", container = "Found in", vendor = "Sold by", quest = "Quest reward" }
-
-local function AtlasLineAlreadyShown(tooltip, source)
-    if not source.zone or not tooltip.GetName or not tooltip.NumLines then return false end
-    local frameName = tooltip:GetName()
-    if not frameName then return false end
-    for i = 1, tooltip:NumLines() do
-        local line = _G[frameName .. "TextLeft" .. i]
-        local text = line and Clean(line:GetText())
-        if text and text:find(source.zone, 1, true) and text:find(source.name, 1, true) then
-            if not source.rate or text:find("%", 1, true) then return true end
-        end
-    end
-    return false
-end
-
-function addon.AppendItemSources(tooltip, itemID)
-    if not itemID or not tooltip or not tooltip.AddLine then return end
-    local added = 0
-    local sources = addon.GetItemSources(itemID)
-    for _, source in ipairs(sources) do
-        if not AtlasLineAlreadyShown(tooltip, source) then
-            if added == 6 then
-                tooltip:AddLine("Additional sources omitted.", 0.71, 0.66, 0.57, true)
-                break
-            end
-            if added == 0 then
-                tooltip:AddLine(" ")
-                tooltip:AddLine("Sources", 0.86, 0.66, 0.35)
-            end
-            local location = source.name .. (source.zone and ("  -  " .. source.zone) or "")
-            local label = LABELS[source.kind]
-            local rate = source.rate and ("  (" .. ("%.2f"):format(source.rate):gsub("0+$", ""):gsub("%.$", "") .. "%)") or ""
-            tooltip:AddLine(label .. ": " .. (location:gsub("|", "||")) .. rate, 0.95, 0.91, 0.83, true)
-            added = added + 1
-        end
-    end
-    local hasRequirement = AppendQuestRequirements(tooltip, itemID)
-    for _, source in ipairs(sources) do
-        if IsQuestReward(source) then return hasRequirement, true end
-    end
-    return hasRequirement, false
 end

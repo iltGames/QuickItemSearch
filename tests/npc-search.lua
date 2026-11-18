@@ -3,6 +3,7 @@ local addon = { index = { [1] = "River Wolf Pelt", [2] = "Wolf Claw", [8] = "Ven
 assert(loadfile("Search.lua"))("QuickItemSearch", addon)
 assert(loadfile("Sources.lua"))("QuickItemSearch", addon)
 assert(loadfile("NpcSearch.lua"))("QuickItemSearch", addon)
+assert(loadfile("MapPins.lua"))("QuickItemSearch", addon)
 
 local timers = {}
 C_Timer = { After = function(_, callback) timers[#timers + 1] = callback end }
@@ -56,6 +57,69 @@ LibQuestieDB.Item = Entity({
     [3] = { npcDrops = { 10 }, vendors = { 10 } }, [4] = { npcDrops = { 20, 40 } },
     [8] = { vendors = { 10, 10 } }, [9] = { vendors = { 20 } },
 }, { 1, 2, 3, 4, 8, 9 })
+local vendor = addon.Search("@sources 8")[1]
+assert(vendor.kind == "npc" and vendor.id == 10 and vendor.vendorZone == "Elwynn Forest",
+    "A vendor without a primary zone should show a known spawn zone")
+assert(addon.Search("@sources 9")[1].vendorZone == "Elwynn Forest",
+    "A vendor without spawn coordinates should show its primary zone")
+npcs[10].zoneID = 40
+local updatedVendors = addon.Search("@sources 8")
+assert(#updatedVendors == 1 and updatedVendors[1].vendorZone == "Westfall",
+    "Prefer the vendor's primary zone and replace older cached zone data")
+local provider = LibQuestieDB
+LibQuestieDB = nil
+assert(addon.Search("@sources 8")[1].vendorZone == "Westfall", "Keep the vendor zone in the source backup")
+LibQuestieDB = provider
+do
+    local npcsForSources = {
+        [51] = { name = "Unknown Vendor" },
+        [52] = { name = "Far Vendor", zoneID = 12 },
+        [53] = { name = "Near Vendor", zoneID = 40 },
+        [54] = { name = "Local Vendor", zoneID = 40, spawns = { [40] = {}, [85] = {} } },
+        [55] = { name = "Other Continent Vendor", zoneID = 14 },
+    }
+    local areas = { [12] = "Elwynn Forest", [40] = "Westfall", [85] = "Tirisfal Glades", [14] = "Durotar" }
+    local function Position(x, y)
+        return { GetXY = function() return x, y end }
+    end
+    local originalMap = C_Map
+    C_Map = {
+        GetAreaInfo = function(area) return areas[area] end,
+        GetBestMapForUnit = function() return 102 end,
+        GetPlayerMapPosition = function() return Position(0.2, 0.2) end,
+        GetWorldPosFromMapPos = function(map, point)
+            local x, y = point:GetXY()
+            return map == 105 and 2 or 1, Position((map - 102) * 100 + x, y)
+        end,
+    }
+    CreateVector2D = Position
+    local originalZoneText = GetRealZoneText
+    GetRealZoneText = function() return "Tirisfal Glades" end
+    local zones = { areaIdToUiMapId = { [85] = 102, [40] = 103, [12] = 104, [14] = 105 } }
+    LibQuestieDB = {
+        Item = Entity({ [100] = { npcDrops = { 52 }, vendors = { 51, 52, 55, 53, 54 } } }),
+        Npc = Entity(npcsForSources),
+        Support = { Get = function() return { private = zones } end },
+    }
+    local sources = addon.Search("@sources 100")
+    assert(sources[1].id == 52 and sources[1].matchLabel == "Drop", "Keep non-vendor source rows in place")
+    assert(sources[2].id == 54 and sources[2].vendorZone == "Tirisfal Glades",
+        "Prioritize a vendor with a location in your zone and show that zone")
+    assert(sources[3].id == 53 and sources[4].id == 52 and sources[5].id == 51 and sources[6].id == 55,
+        "Sort other vendors by same-continent zone distance, with unknown distances last in original order")
+    C_Map.GetWorldPosFromMapPos = nil
+    sources = addon.Search("@sources 100")
+    assert(sources[2].id == 54 and sources[3].id == 51 and sources[4].id == 52,
+        "Keep current-zone priority when map distances are unavailable")
+    C_Map.GetBestMapForUnit = nil
+    assert(addon.Search("@sources 100")[2].id == 54, "Use the current zone name when the player map is unavailable")
+    QuickItemSearchSettings = { nearestVendorsFirst = false }
+    sources = addon.Search("@sources 100")
+    assert(sources[2].id == 51 and sources[6].id == 54 and sources[6].vendorZone == "Westfall",
+        "Disabling proximity sorting should restore the provider order and primary zones")
+    QuickItemSearchSettings, LibQuestieDB, C_Map, GetRealZoneText, CreateVector2D =
+        nil, provider, originalMap, originalZoneText, nil
+end
 ForeverDungeonJournal_NS = { DB = { TestDungeon = { bosses = {
     { npcID = 10, name = "River Wolf", loot = { { 1 }, { 5, "Journal Trinket", "Trinket", 3 } } },
     { npcID = 20, name = "River Wolf", loot = { { 6 } } },

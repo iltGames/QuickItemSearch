@@ -21,26 +21,17 @@ LibQuestieDB = {
 assert(loadfile("Sources.lua"))("QuickItemSearch", addon)
 while #scheduled > 0 do table.remove(scheduled, 1)() end
 
-local function TooltipLines(itemID)
-    local lines = {}
-    addon.AppendItemSources({ AddLine = function(_, line) lines[#lines + 1] = line end }, itemID)
-    return table.concat(lines, "\n")
-end
-
-local tooltip = TooltipLines(11)
-assert(tooltip:find("Required for quest: Collect Supplies", 1, true), "Item objectives must appear in the tooltip")
-assert(tooltip:find("Required for quest: Use Supplies", 1, true), "Required quest items must appear in the tooltip")
-assert(tooltip:find("Quest reward: Earn Supplies", 1, true), "Quest rewards must retain their own label")
-assert(not tooltip:find("Deliver a Message", 1, true), "NPC objectives must not match item IDs")
-local _, count = tooltip:gsub("Collect Supplies", "")
-assert(count == 1, "Multiple objectives for the same quest must produce a single line")
-assert(TooltipLines(13) == "", "Unrelated items must omit quest requirements")
 local requiredFor = addon.GetItemQuestRequirements(11)
-assert(#requiredFor == 2 and requiredFor[1].id == 101 and requiredFor[2].id == 102)
+assert(#requiredFor == 2 and requiredFor[1].id == 101 and requiredFor[2].id == 102,
+    "Quest requirements must deduplicate item objectives and exclude NPC objectives")
+local choices = addon.GetItemQuestChoices(11, true)
+assert(#choices == 3 and choices[1].name == "Collect Supplies" and choices[2].name == "Use Supplies"
+    and choices[3].name == "Earn Supplies", "The context menu should list requirements and rewards")
+assert(#addon.GetItemQuestChoices(11, false) == 2, "Disabling quest rewards must preserve requirements")
 assert(#addon.GetItemQuestRequirements(13) == 0, "Unrelated items must have no quest menu options")
 assert(addon.GetItemQuestRequirements(14)[1].id == 102, "Spell objectives can require an item")
 
 LibQuestieDB = nil
-assert(TooltipLines(12) == "", "QuestieDB must remain optional")
+assert(#addon.GetItemQuestChoices(12, true) == 0, "QuestieDB must remain optional")
 
-print("Quest requirement tooltip tests passed")
+print("Quest requirement and menu tests passed")

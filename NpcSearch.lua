@@ -31,53 +31,9 @@ function addon.FindNPCNames(query)
     end
 end
 
-local function ZoneName(id)
-    local name = C_Map and C_Map.GetAreaInfo and C_Map.GetAreaInfo(id)
-    if not name or name == "" then name = GetAreaInfo and GetAreaInfo(id) end
-    return name and name ~= "" and name or ("Area %d"):format(id)
-end
-
-local function ValidArea(id)
-    return type(id) == "number" and id > 0
-end
-
-local function NPCLocations(npcs, id)
-    local spawns = npcs.Get(id, "spawns") or {}
-    local areas, seenAreas = {}, {}
-    local function AddArea(area)
-        if ValidArea(area) and not seenAreas[area] then
-            seenAreas[area] = true
-            areas[#areas + 1] = { id = area, name = ZoneName(area) }
-        end
-    end
-    for area in pairs(spawns) do AddArea(area) end
-    for area in pairs(npcs.Get(id, "waypoints") or {}) do AddArea(area) end
-    if #areas == 0 then AddArea(npcs.Get(id, "zoneID")) end
-    table.sort(areas, function(left, right)
-        if left.name == right.name then return left.id < right.id end
-        return left.name < right.name
-    end)
-
-    local rows = {}
-    for _, area in ipairs(areas) do
-        local seen = {}
-        for _, point in ipairs(spawns[area.id] or {}) do
-            local x, y = point[1], point[2]
-            if type(x) == "number" and type(y) == "number" and x >= 0 and x <= 100 and y >= 0 and y <= 100 then
-                local label = ("%.1f, %.1f"):format(x, y)
-                if not seen[label] then
-                    rows[#rows + 1] = { kind = "text", name = area.name, matchLabel = label }
-                    seen[label] = true
-                end
-            end
-        end
-        if not next(seen) then rows[#rows + 1] = { kind = "text", name = area.name } end
-    end
-    return rows
-end
-
 local function NPCDetails(npcs, id, name)
-    local locations = NPCLocations(npcs, id)
+    local locations = addon.GetEntityLocations(npcs, id)
+    for _, location in ipairs(locations) do location.pinTargetName = name end
     local title = ("%s  ·  NPC %d"):format(name:gsub("|", "||"), id)
     if #locations == 0 then title = title .. "\nNo known locations." end
     local showLoot = addon.IsAutomaticSectionEnabled("NPC Loot")

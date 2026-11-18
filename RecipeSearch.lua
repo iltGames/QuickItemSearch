@@ -1,5 +1,5 @@
 local _, addon = ...
-local recipesByOutput
+local recipesByOutput, recipesByReagent, recipesBySpell
 
 local allStatsEnchants = { [13626] = true, [13700] = true, [13941] = true, [20025] = true }
 local primaryStats = {
@@ -33,19 +33,38 @@ local function RecipeResult(recipe, rank)
     }
 end
 
-function addon.GetItemRecipes(itemID)
-    if not recipesByOutput then
-        recipesByOutput = {}
-        for _, recipe in ipairs(addon.recipes) do
-            local output = recipe[5]
-            if output then
-                local rows = recipesByOutput[output] or {}
-                rows[#rows + 1] = RecipeResult(recipe, 3)
-                recipesByOutput[output] = rows
-            end
+local function IndexRecipes()
+    if recipesByOutput then return end
+    recipesByOutput, recipesByReagent, recipesBySpell = {}, {}, {}
+    for _, recipe in ipairs(addon.recipes) do
+        recipesBySpell[recipe[1]] = recipesBySpell[recipe[1]] or recipe
+        local output = recipe[5]
+        if output then
+            local rows = recipesByOutput[output] or {}
+            rows[#rows + 1] = RecipeResult(recipe, 3)
+            recipesByOutput[output] = rows
+        end
+        for _, id in ipairs(recipe[6] or {}) do
+            local recipes = recipesByReagent[id] or {}
+            recipes[recipe] = true
+            recipesByReagent[id] = recipes
         end
     end
+end
+
+function addon.GetItemRecipes(itemID)
+    IndexRecipes()
     return recipesByOutput[itemID]
+end
+
+function addon.HasRecipesUsingItem(itemID)
+    IndexRecipes()
+    return recipesByReagent[itemID] ~= nil
+end
+
+function addon.GetRecipe(spellID)
+    IndexRecipes()
+    return recipesBySpell[spellID]
 end
 
 local function SortRecipeResults(results)
@@ -58,17 +77,13 @@ local function SortRecipeResults(results)
 end
 
 function addon.FindRecipesUsingItems(items)
-    local ids = {}
-    for _, item in ipairs(items) do ids[item.id] = true end
-    local results = {}
-    if not next(ids) then return results end
-    for _, recipe in ipairs(addon.recipes) do
-        if recipe[6] then
-            for _, reagentID in ipairs(recipe[6]) do
-                if ids[reagentID] then
-                    results[#results + 1] = RecipeResult(recipe, 1)
-                    break
-                end
+    IndexRecipes()
+    local results, seen = {}, {}
+    for _, item in ipairs(items) do
+        for recipe in pairs(recipesByReagent[item.id] or {}) do
+            if not seen[recipe] then
+                seen[recipe] = true
+                results[#results + 1] = RecipeResult(recipe, 1)
             end
         end
     end
@@ -109,6 +124,25 @@ function addon.SearchRecipeUses(target, findItems)
     local results = addon.FindRecipesUsingItems(items)
     if #results == 0 then return results, "No indexed recipes use this reagent." end
     return results, "Recipes using " .. ((itemID and addon.index[itemID] or target):gsub("|", "||"))
+end
+
+function addon.SearchRecipeDetails(spellID)
+    local recipe = addon.GetRecipe(spellID)
+    if not recipe then return {}, "No indexed recipe for this spell." end
+    local sections = {}
+    local function AddItems(title, ids)
+        local rows = {}
+        for _, id in ipairs(ids) do
+            if not addon.IsPTRItem(id) then rows[#rows + 1] = { id = id, name = addon.index[id] } end
+        end
+        if #rows > 0 then sections[#sections + 1] = { title = title, rows = rows } end
+    end
+    AddItems("Reagents", recipe[6] or {})
+    if recipe[5] then AddItems("Crafted item", { recipe[5] }) end
+    local first = table.remove(sections, 1)
+    if not first then return {}, "No indexed reagents or crafted item." end
+    sections.title = first.title
+    return first.rows, recipe[2]:gsub("|", "||"), nil, nil, sections
 end
 
 function addon.SearchRecipes(target, action, literal, requiredProfession)

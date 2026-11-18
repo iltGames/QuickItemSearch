@@ -1,3 +1,10 @@
+## Quick Item Search 0.4.9
+
+- Open a result's actions with right-click, Enter, or Right Arrow. Long menus scroll by wheel, scrollbar, or arrow keys. Left Arrow returns to the results, and clicking items or section headers moves the selection to that row.
+- Follow related recipes, reagents, item sources, quest requirements and rewards, and gathering locations. Vendor results can show their zones and sort by proximity when location data is available.
+- Add world map pins for NPCs, vendors, and quest contacts with known coordinates. When a target has multiple locations, choose the zone and coordinates.
+- See pet training details and class spell unlock requirements in the actions menu. Item tooltips stay shorter because source, quest, and crafting details are available through related searches.
+
 ## Quick Item Search 0.4.8
 
 - Search NPCs and mobs by name or ID with `@npc` or `@mob`. Select a result to see known zones and spawn coordinates, indexed loot, and items the NPC sells when available.

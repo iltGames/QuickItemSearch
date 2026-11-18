@@ -1,7 +1,7 @@
 local function Noop() end
 
 local resizeHandle
-local buttons, checkboxes = {}, {}
+local buttons, checkboxes, sliders = {}, {}, {}
 local addonOptions
 Settings = {
     RegisterCanvasLayoutCategory = function(panel) addonOptions = panel; return {} end,
@@ -27,7 +27,10 @@ function methods:Show()
     if self.scripts.OnShow then self.scripts.OnShow(self) end
 end
 function methods:SetEnabled(enabled) self.enabled = enabled end
+function methods:LockHighlight() self.highlighted = true end
+function methods:UnlockHighlight() self.highlighted = false end
 function methods:GetFrameLevel() return 1 end
+function methods:GetParent() return self.parent end
 function methods:GetStringWidth() return #self.text * 6 end
 function methods:GetRight() return 560 end
 function methods:HookScript(name, callback)
@@ -66,6 +69,11 @@ function methods:SetCursorPosition(position) self.cursor = position end
 function methods:Click() self.scripts.OnClick(self) end
 function methods:SetThumbTexture(thumb) self.thumb = thumb end
 function methods:GetThumbTexture() return self.thumb end
+function methods:SetMinMaxValues(minimum, maximum) self.minimum, self.maximum = minimum, maximum end
+function methods:SetValue(value)
+    self.value = value
+    if self.scripts.OnValueChanged then self.scripts.OnValueChanged(self, value) end
+end
 
 local function Widget()
     return setmetatable({scripts = {}, shown = true}, {
@@ -83,6 +91,7 @@ function CreateFrame(kind, name, parent)
         resizeHandle = frame
         buttons[#buttons + 1] = frame
     end
+    if kind == "Slider" then sliders[#sliders + 1] = frame end
     if kind == "CheckButton" then
         checkboxes[#checkboxes + 1] = frame
         function frame:CreateFontString()
@@ -113,6 +122,7 @@ QuickItemSearchSettings = {rows = 20}
 local addon = {}
 assert(loadfile("Search.lua"))("QuickItemSearch", addon)
 assert(loadfile("Sources.lua"))("QuickItemSearch", addon)
+assert(loadfile("MapPins.lua"))("QuickItemSearch", addon)
 local lastQuery
 function addon.Search(query)
     lastQuery = query
@@ -290,11 +300,41 @@ function addon.Search()
     } }
 end
 toggle("@spell bite 3")
+local petRow
 for _, button in ipairs(buttons) do
-    if button.entry and button.entry.tameSources then button.scripts.OnEnter(button) end
+    if button.entry and button.entry.tameSources then petRow = button; break end
 end
-assert(GameTooltip:IsShown() and tooltipLines[2] == "Requires pet level 16 to train.")
-assert(tooltipLines[4] == "Deepmoss Creeper - Stonetalon Mountains (Level 16-17)")
+petRow.scripts.OnEnter(petRow)
+assert(GameTooltip:IsShown() and #tooltipLines == 2 and tooltipLines[2] == "Right-click for training details.",
+    "Pet training information should move out of the tooltip")
+petRow.scripts.OnClick(petRow, "RightButton")
+local sourceWithoutQuestie
+for _, button in ipairs(buttons) do
+    if button.label and button.label:GetText() == "Deepmoss Creeper - lvl 16-17 (Stonetalon Mountains)"
+        and button:IsShown() and button.parent:IsShown() then
+        sourceWithoutQuestie = button
+    end
+end
+assert(sourceWithoutQuestie and not sourceWithoutQuestie.enabled and not sourceWithoutQuestie.query,
+    "The menu must still show the beast's level and zone without QuestieDB")
+QuickItemSearchSettings.resultContextMenus = false
+toggle("@spell bite 3")
+petRow:Click()
+assert(sourceWithoutQuestie:IsShown() and sourceWithoutQuestie.parent:IsShown(),
+    "Primary activation should open pet training details with context menus off")
+QuickItemSearchSettings.resultContextMenus = true
+LibQuestieDB = { Npc = { Get = Noop, GetAllIds = function() return {} end } }
+toggle("@spell bite 3")
+petRow.scripts.OnClick(petRow, "RightButton")
+for _, button in ipairs(buttons) do
+    if button.query == "@npc Deepmoss Creeper" and button:IsShown() and button.parent:IsShown() then
+        assert(button.label:GetText() == "Find Deepmoss Creeper - lvl 16-17 (Stonetalon Mountains)")
+    end
+end
+ClickQuery("@npc Deepmoss Creeper")
+assert(searchBox:GetText() == "@npc Deepmoss Creeper", "The label should retain the exact beast lookup")
+LibQuestieDB = nil
+toggle("@spell bite 3")
 
 local window = QuickItemSearchFrame
 local function PressWindowKey(key)
@@ -310,21 +350,53 @@ assert(PressWindowKey("W"), "an unfocused search must pass movement keys through
 assert(not window.keyboardEnabled, "the idle search window must leave game bindings alone")
 InCombatLockdown = function() return false end
 
-local lastEmote
-function addon.Search()
-    return {
+local lastEmote, finishDelayedSearch
+function addon.Search(query)
+    local matches = {
         {kind = "emote", name = "Wave"},
         {kind = "emote", name = "Bow"},
     }
+    if query == "emote delayed" then
+        return matches, nil, function(done)
+            finishDelayedSearch = done
+            return Noop
+        end
+    end
+    return matches
 end
 function addon.PerformSearchEmote(entry)
     lastEmote = entry.name
     return true
 end
 toggle("emote")
-searchBox.scripts.OnArrowPressed(searchBox, "DOWN")
+local previousTimer, cancelledDebounce = C_Timer, false
+C_Timer = { NewTimer = function()
+    return { Cancel = function() cancelledDebounce = true end }
+end }
+searchBox:SetText("emote delayed")
+searchBox.scripts.OnTextChanged(searchBox)
 searchBox.scripts.OnEnterPressed(searchBox)
-assert(lastEmote == "Bow", "Enter must activate the selected search result")
+C_Timer = previousTimer
+assert(not GetCurrentKeyBoardFocus() and window.keyboardEnabled,
+    "Confirming a search with Enter should transfer the arrows from the edit box to the results")
+assert(cancelledDebounce and finishDelayedSearch, "Enter should run a pending query before handing off keyboard focus")
+finishDelayedSearch({ { kind = "emote", name = "Wave" }, { kind = "emote", name = "Bow" } })
+assert(not PressWindowKey("DOWN"), "A late search update should keep result navigation active")
+assert(not PressWindowKey("ENTER"))
+window.scripts.OnKeyUp(window, "ENTER")
+assert(lastEmote == "Bow", "The arrows should still select the next result after the update")
+toggle("emote")
+assert(GetCurrentKeyBoardFocus() == searchBox)
+searchBox.scripts.OnArrowPressed(searchBox, "DOWN")
+assert(not GetCurrentKeyBoardFocus() and window.keyboardEnabled,
+    "Down in the search box should hand keyboard navigation over to the results")
+assert(not PressWindowKey("ENTER"))
+window.scripts.OnKeyUp(window, "ENTER")
+assert(lastEmote == "Bow", "The first Down should move to the next result before handing off")
+for _, key in ipairs({ "LEFT", "RIGHT", "RIGHT", "LEFT" }) do
+    assert(not PressWindowKey(key) and window.keyboardEnabled,
+        key .. " should keep navigation active on a result without context actions")
+end
 assert(not PressWindowKey("UP"), "result navigation must consume the Up key")
 assert(not PressWindowKey("ENTER"), "result navigation must consume Enter")
 window.scripts.OnKeyUp(window, "ENTER")
@@ -368,6 +440,37 @@ local function Result(predicate)
         if button.entry and predicate(button.entry) then return button end
     end
 end
+do
+    local search = addon.Search
+    local extra = { kind = "text", name = "Fourth match" }
+    function addon.Search()
+        return {
+            { kind = "text", name = "First match" },
+            { kind = "text", name = "Second match" },
+            { kind = "text", name = "Third match" },
+            extra,
+        }, nil, nil, nil, { title = "Matches", { title = "Other", rows = { { kind = "text", name = "Other match" } } } }
+    end
+    local function ExtraMatch() return Result(function(entry) return entry == extra end) end
+    toggle("section preview")
+    assert(not ExtraMatch())
+    searchBox.scripts.OnArrowPressed(searchBox, "DOWN")
+    assert(not PressWindowKey("DOWN") and not PressWindowKey("DOWN"))
+    assert(not PressWindowKey("RIGHT") and ExtraMatch(), "Right should expand the selected Show all results row")
+    assert(not PressWindowKey("RIGHT") and ExtraMatch(), "Right again on the newly revealed row should keep navigation active")
+    assert(not PressWindowKey("DOWN"))
+    assert(not PressWindowKey("LEFT") and not ExtraMatch(), "Left should collapse the selected Show fewer results row")
+    assert(not PressWindowKey("RIGHT") and ExtraMatch(), "The section should reopen without refocusing the window")
+    toggle("section preview")
+    local header = assert(Result(function(entry) return entry.sectionHeader and entry.name == "Other" end))
+    local firstMatch = assert(Result(function(entry) return entry.name == "Other match" end))
+    header:Click()
+    assert(header.selection:IsShown() and header.selectionEdge:IsShown() and not GetCurrentKeyBoardFocus(),
+        "Clicking a section header should move the highlight and leave the search box")
+    assert(not PressWindowKey("DOWN") and firstMatch.selection:IsShown() and not header.selection:IsShown(),
+        "Down should move from the clicked header into that section")
+    addon.Search = search
+end
 toggle("@quest pie")
 assert(GetCurrentKeyBoardFocus() == searchBox, "Opening search should focus the query input")
 local quest = assert(Result(function(entry) return entry.kind == "quest" end))
@@ -379,9 +482,15 @@ questProgress = "3/4"
 window.scripts.OnEvent(window, "QUEST_LOG_UPDATE")
 assert(Result(function(entry) return entry.matchLabel == "3/4" end), "Open quest details should refresh progress")
 searchBox:SetFocus()
-Result(function(entry) return entry.id == 769 end):Click()
+local objectiveItem = assert(Result(function(entry) return entry.id == 769 end))
+objectiveItem:Click()
 assert(openedItem == "item:769", "Clicking an objective item should use the normal inspect action")
-assert(not GetCurrentKeyBoardFocus(), "Opening an item should release typing focus")
+assert(not GetCurrentKeyBoardFocus() and objectiveItem.selection:IsShown() and window.keyboardEnabled,
+    "Clicking an item should give the selected result keyboard navigation")
+assert(not PressWindowKey("DOWN"), "Arrow navigation should continue from a clicked item")
+local followUp = assert(Result(function(entry) return entry.kind == "quest" and entry.id == 84 end))
+assert(followUp.selection:IsShown(), "Down should select the first navigable row after the clicked item")
+assert(not PressWindowKey("UP") and objectiveItem.selection:IsShown(), "Up should return to the clicked row")
 Result(function(entry) return entry.kind == "quest" and entry.id == 84 end):Click()
 assert(searchBox:GetText() == "@quest 84", "Clicking a follow-up should open its quest details")
 assert(not GetCurrentKeyBoardFocus() and PressWindowKey("W"), "Following a quest link must leave movement keys free")
@@ -390,9 +499,45 @@ assert(searchBox:GetText() == "@quest 86", "Clicking a prerequisite should open 
 
 toggle("@quest pie")
 searchBox.scripts.OnArrowPressed(searchBox, "DOWN")
-searchBox.scripts.OnEnterPressed(searchBox)
+assert(not PressWindowKey("ENTER"))
+window.scripts.OnKeyUp(window, "ENTER")
+assert(searchBox:GetText() == "@quest pie" and not GetCurrentKeyBoardFocus(),
+    "Enter should open the selected quest's context menu before taking its default action")
+local function IsPopupQueryHighlighted(query)
+    for _, button in ipairs(buttons) do
+        if button.query == query and button:IsShown() and button.parent:IsShown() and button.highlighted then return true end
+    end
+    return false
+end
+assert(not PressWindowKey("LEFT"), "Left should return from the context menu to the results")
+for _ = 1, 3 do
+    assert(not PressWindowKey("LEFT") and window.keyboardEnabled, "Repeated Left should keep the results focused")
+end
+assert(not PressWindowKey("RIGHT"), "Right should reopen the selected result's context menu")
+assert(IsPopupQueryHighlighted("@quest 86"), "Right should highlight the top choice on opening the menu")
+assert(not PressWindowKey("DOWN"), "Down should navigate the open context menu")
+assert(not PressWindowKey("ENTER"))
+window.scripts.OnKeyUp(window, "ENTER")
 assert(searchBox:GetText() == "@quest 86" and GetCurrentKeyBoardFocus() == searchBox,
     "Keyboard activation should still allow keyboard navigation into the quest details")
+toggle("@quest pie")
+searchBox.scripts.OnArrowPressed(searchBox, "UP")
+searchBox.scripts.OnArrowPressed(searchBox, "RIGHT")
+assert(searchBox:GetText() == "@quest pie" and not GetCurrentKeyBoardFocus(),
+    "Right should open the context menu directly from keyboard result selection")
+assert(IsPopupQueryHighlighted("@quest 86"), "Right from the search box should highlight the top choice too")
+assert(not PressWindowKey("LEFT"), "Left should close the menu and keep the current search")
+local objective = { kind = "text", name = "Collect 4 Chunks of Boar Meat", matchLabel = "1/4" }
+function addon.Search() return { objective } end
+toggle("objective")
+local objectiveRow = assert(Result(function(entry) return entry == objective end))
+tooltipLines = {}
+objectiveRow.scripts.OnEnter(objectiveRow)
+assert(#tooltipLines == 0, "An unclipped objective should not repeat its title on hover")
+function objectiveRow.label:IsTruncated() return true end
+objectiveRow.scripts.OnEnter(objectiveRow)
+assert(#tooltipLines == 1 and tooltipLines[1] == objective.name, "Hover should reveal clipped objective text")
+objectiveRow.label.IsTruncated = nil
 
 function addon.Search(query)
     if query == "zul farrak" then
@@ -467,16 +612,31 @@ function GameTooltip:NumLines() return 1 end
 tooltipLines = {}
 reward.scripts.OnEnter(reward)
 assert(tooltipLines[#tooltipLines] == "Right-click to open a quest.", "Reward items should advertise the quest menu")
+assert(#tooltipLines == 1, "Hover should show a short hint in place of the item source list")
 reward.scripts.OnClick(reward, "RightButton")
 ClickQuery("@quest 87")
 assert(searchBox:GetText() == "@quest 87", "A reward item should link to its quest")
 
 toggle("boar meat")
+tooltipLines = {}
+ingredient.scripts.OnEnter(ingredient)
+assert(#tooltipLines == 1 and tooltipLines[1] == "Right-click to open a quest.",
+    "Quest requirements should be listed in the menu and stay out of the tooltip")
+ItemRefTooltip = Widget()
+function ItemRefTooltip:GetItem() return "Chunk of Boar Meat", "|Hitem:769|h[Chunk of Boar Meat]|h" end
+function ItemRefTooltip:AddLine() error("The inspected item tooltip must use the game's own details") end
+ingredient:Click()
+assert(openedItem == "item:769", "Clicking an item must still open its native inspection tooltip")
+ItemRefTooltip = nil
+openedItem = nil
 ingredient.scripts.OnClick(ingredient, "RightButton")
 local matches = {}
 for _, button in ipairs(buttons) do
     if button.query and button:IsShown() and button.parent:IsShown() then
         matches[button.query] = (matches[button.query] or 0) + 1
+        if button.query == "@quest 86" then assert(button.label:GetText() == "Required and rewarded by: Pie for Billy") end
+        if button.query == "@quest 87" then assert(button.label:GetText() == "Reward from: Reward Quest") end
+        if button.query == "@quest 88" then assert(button.label:GetText() == "Required for: Another Pie Quest") end
     end
 end
 assert(matches["@quest 86"] == 1 and matches["@quest 87"] == 1 and matches["@quest 88"] == 1,
@@ -495,15 +655,39 @@ function addon.GetItemQuestRequirements()
     return quests
 end
 ingredient.scripts.OnClick(ingredient, "RightButton")
-local nextPage
-for _, button in ipairs(buttons) do
-    if button.label and button.label:GetText() == "Next quests" and button:IsShown() and button.parent:IsShown() then
-        nextPage = button
-        break
+local function VisiblePopupQuery(query)
+    for _, button in ipairs(buttons) do
+        if button.query == query and button:IsShown() and button.parent:IsShown() then return button end
     end
 end
-assert(nextPage, "Long quest lists must offer a second page")
-nextPage:Click()
+local firstQuest = assert(VisiblePopupQuery("@quest 78"))
+local questPopup = firstQuest.parent
+local function PopupScrollbar(popup)
+    for _, slider in ipairs(sliders) do
+        if slider.parent == popup then return slider end
+    end
+end
+local questScrollbar = assert(PopupScrollbar(questPopup), "Long context menus must have a scrollbar")
+assert(questScrollbar:IsShown() and questScrollbar.value == 1)
+assert(questScrollbar.minimum == 1 and questScrollbar.maximum == 4, "The thumb range should match the hidden rows")
+for _, button in ipairs(buttons) do
+    if button.parent == questPopup and button:IsShown() then
+        assert(button.query, "A quest menu should contain choices without pagination buttons")
+    end
+end
+questPopup.scripts.OnMouseWheel(questPopup, -1)
+assert(questScrollbar.value == 2 and not VisiblePopupQuery("@quest 78") and VisiblePopupQuery("@quest 86"),
+    "The mouse wheel should advance the popup one row")
+questScrollbar:SetValue(4)
+assert(VisiblePopupQuery("@quest 88"), "Dragging the thumb to the end should expose the last choice")
+questScrollbar.scripts.OnMouseWheel(questScrollbar, 1)
+assert(questScrollbar.value == 3 and not VisiblePopupQuery("@quest 88"), "The wheel should work over the scrollbar")
+ingredient.scripts.OnClick(ingredient, "RightButton")
+ingredient.scripts.OnClick(ingredient, "RightButton")
+assert(questScrollbar.value == 1 and VisiblePopupQuery("@quest 78"), "Reopening should reset the scroll position")
+for _ = 1, 11 do assert(not PressWindowKey("DOWN")) end
+assert(questScrollbar.value == 4 and VisiblePopupQuery("@quest 88"),
+    "Keyboard navigation should scroll through the end of the menu")
 ClickQuery("@quest 88")
 assert(searchBox:GetText() == "@quest 88")
 
@@ -559,14 +743,14 @@ settingsQuests:SetChecked(true)
 settingsQuests:Click()
 assert(compactQuests:GetChecked(), "The open compact window should reflect AddOns settings changes")
 
-local function RewardCheckbox(panel)
+local function PreferenceCheckbox(panel, label)
     for _, check in ipairs(checkboxes) do
-        if check.parent == panel and check.label and check.label:GetText() == "Quest reward links" then return check end
+        if check.parent == panel and check.label and check.label:GetText() == label then return check end
     end
-    error("Missing quest reward preference")
+    error("Missing preference: " .. label)
 end
-local compactRewards = RewardCheckbox(compact)
-local settingsRewards = RewardCheckbox(addonOptions)
+local compactRewards = PreferenceCheckbox(compact, "Quest reward links")
+local settingsRewards = PreferenceCheckbox(addonOptions, "Quest reward links")
 assert(compactRewards:GetChecked() and settingsRewards:GetChecked(), "Quest reward links should be on by default")
 
 local compactFollowUps = SectionCheckbox(compact, "Next quests")
@@ -607,6 +791,36 @@ settingsVendors:Click()
 assert(not compactVendors:GetChecked() and not reloaded.IsAutomaticSectionEnabled("Vendor Items"),
     "Vendor inventory visibility should sync across menus and persist across reloads")
 
+local compactVendorZones = PreferenceCheckbox(compact, "Vendor zones")
+local settingsVendorZones = PreferenceCheckbox(addonOptions, "Vendor zones")
+assert(compactVendorZones:GetChecked() and settingsVendorZones:GetChecked(), "Vendor zones should be on by default")
+do
+    local search = addon.Search
+    function addon.Search(query)
+        if query ~= "@sources 1" then return search(query) end
+        return { { kind = "npc", id = 10, name = "Merchant", matchLabel = "Vendor", vendorZone = "Elwynn Forest" } }
+    end
+    toggle("@sources 1")
+    local merchant = assert(Result(function(entry) return entry.name == "Merchant" end))
+    assert(merchant.label:GetText() == "Merchant" and merchant.idLabel:GetText() == "Vendor · Elwynn Forest",
+        "Show the zone on the right of the vendor name")
+    settingsVendorZones:SetChecked(false)
+    settingsVendorZones:Click()
+    assert(not compactVendorZones:GetChecked() and merchant.idLabel:GetText() == "Vendor",
+        "Disabling vendor zones should sync across menus and update the visible row")
+    addon.Search = search
+end
+
+local compactNearestVendors = PreferenceCheckbox(compact, "Nearest vendors first")
+local settingsNearestVendors = PreferenceCheckbox(addonOptions, "Nearest vendors first")
+assert(compactNearestVendors:GetChecked() and settingsNearestVendors:GetChecked(),
+    "Nearest vendors first should be on by default")
+before = visibleSearches
+settingsNearestVendors:SetChecked(false)
+settingsNearestVendors:Click()
+assert(not compactNearestVendors:GetChecked() and visibleSearches == before + 1,
+    "Changing vendor sorting should sync across menus and refresh the search")
+
 FindButton("50", compact):Click()
 for i = 1, 55 do toggle("search " .. i) end
 assert(#QuickItemSearchSettings.history == 50 and QuickItemSearchSettings.history[50] == "search 6")
@@ -644,8 +858,11 @@ addon.GetItemQuestRequirements = function() return {} end
 assert(loadfile("UI.lua"))("QuickItemSearch", addon)
 addonOptions:Hide()
 addonOptions:Show()
-local reloadedRewards = RewardCheckbox(addonOptions)
+local reloadedRewards = PreferenceCheckbox(addonOptions, "Quest reward links")
 assert(not reloadedRewards:GetChecked(), "Disabled quest reward links should persist after reload")
+assert(not PreferenceCheckbox(addonOptions, "Vendor zones"):GetChecked(), "Disabled vendor zones should persist after reload")
+assert(not PreferenceCheckbox(addonOptions, "Nearest vendors first"):GetChecked(),
+    "Disabled vendor proximity sorting should persist after reload")
 function addon.Search(query)
     if query == "reward" then return { { id = 789, name = "Reward" } } end
     assert(query == "@quest 87" or query == "@quest 88")
@@ -672,5 +889,180 @@ SlashCmdList.QUICKITEMSEARCH("reward")
 reward.scripts.OnClick(reward, "RightButton")
 ClickQuery("@quest 87")
 assert(searchBox:GetText() == "@quest 87", "Re-enabling links should restore cached reward quests")
+
+addon.index = { [3820] = "Stranglekelp" }
+addon.recipes = { { 501, "Kelp Draught", "Alchemy", 75, false, { 3820 } } }
+C_Item.IsItemDataCachedByID = function(id)
+    assert(id == 3820, "Opening related recipes must keep spell IDs out of the item cache")
+    return false
+end
+C_Spell = { GetSpellTexture = Noop }
+assert(loadfile("RecipeSearch.lua"))("QuickItemSearch", addon)
+assert(loadfile("Questions.lua"))("QuickItemSearch", addon)
+local function ContextCheckbox(panel, label)
+    for _, check in ipairs(checkboxes) do
+        if check.parent == panel and check.label:GetText() == (label or "Result context menus") then return check end
+    end
+end
+function addon.Search(query)
+    if query == "kelp" then return { { id = 3820, name = "Stranglekelp" } } end
+    if query == "usedin 3820" then return addon.FindRecipesUsingItems({ { id = 3820 } }) end
+    return {}
+end
+local reloadToggle = SlashCmdList.QUICKITEMSEARCH
+reloadToggle("kelp")
+local kelp = assert(Result(function(entry) return entry.id == 3820 end))
+kelp.scripts.OnClick(kelp, "RightButton")
+ClickQuery("usedin 3820")
+assert(Result(function(entry) return entry.id == 501 end), "The reagent menu must open recipes for that item ID")
+local contextCheck = assert(ContextCheckbox(QuickItemSearchOptionsFrame))
+local settingsContextCheck = assert(ContextCheckbox(addonOptions))
+assert(contextCheck:GetChecked() and settingsContextCheck:GetChecked())
+contextCheck:SetChecked(false)
+contextCheck:Click()
+assert(not settingsContextCheck:GetChecked(), "The context menu toggle must sync across settings")
+reloadToggle("kelp")
+kelp.scripts.OnClick(kelp, "RightButton")
+for _, button in ipairs(buttons) do
+    assert(button.query ~= "usedin 3820" or not button:IsShown() or not button.parent:IsShown(),
+        "Turning off context menus must hide the related recipe action")
+end
+assert(loadfile("UI.lua"))("QuickItemSearch", addon)
+addonOptions:Show()
+assert(not assert(ContextCheckbox(addonOptions)):GetChecked(), "The disabled setting must survive a UI reload")
+
+local placed
+local mobSpawns = { [12] = { { 26.25, 87 }, { 32, 75 } }, [40] = { { 12, 30 } } }
+for i = 1, 8 do mobSpawns[12][#mobSpawns[12] + 1] = { 32 + i, 75 } end
+C_Map = {
+    GetAreaInfo = function(id) return id == 12 and "Elwynn Forest" or "Westfall" end,
+    CanSetUserWaypointOnMap = function(id) return id == 1429 end,
+    SetUserWaypoint = function(point) placed = point; return true end,
+}
+UiMapPoint = { CreateFromCoordinates = function(...) return { ... } end }
+LibQuestieDB = {
+    Support = { Get = function()
+        return { private = { areaIdToUiMapId = "return { [12] = 1429, [40] = 0 }" } }
+    end },
+    Npc = { Get = function(id, field)
+        if field == "name" then return "River Wolf" end
+        if field == "spawns" then return mobSpawns end
+    end },
+    Quest = { Get = function(_, field)
+        if field == "startedBy" then return { { 448 } } end
+    end },
+}
+QuickItemSearchSettings.resultContextMenus = true
+function addon.Search(query)
+    if query == "mob" then return { { kind = "npc", id = 448, name = "River Wolf" } } end
+    if query == "quest" then return { { kind = "quest", id = 99, name = "Find the River Wolf" } } end
+    if query == "gather" then return { { kind = "text", name = "Elwynn Forest", areaID = 12, matchLabel = "32.0, 75.0" } } end
+    return {}
+end
+local function PopupChoice(label)
+    for _, button in ipairs(buttons) do
+        if button.label and button:IsShown() and button.parent:IsShown() and button.label:GetText() == label then
+            return button
+        end
+    end
+end
+reloadToggle = SlashCmdList.QUICKITEMSEARCH
+reloadToggle("mob")
+local mob = assert(Result(function(entry) return entry.kind == "npc" end))
+mob.scripts.OnClick(mob, "RightButton")
+local pinAction = assert(PopupChoice("Add map pin"), "NPC results with coordinates must offer a map pin")
+local pinScrollbar = assert(PopupScrollbar(pinAction.parent))
+assert(not pinScrollbar:IsShown(), "A short context menu should hide the scrollbar")
+pinAction:Click()
+assert(not placed, "An NPC with several spawns needs a location selection")
+assert(not PopupChoice("Westfall (12.0, 30.0)"), "Suppressed map IDs must be excluded from the picker")
+assert(pinScrollbar:IsShown())
+pinScrollbar:SetValue(pinScrollbar.maximum)
+assert(PopupChoice("Elwynn Forest (40.0, 75.0)"), "The final map-pin location should be reachable by scrolling")
+assert(PopupChoice("Back")):Click()
+assert(PopupChoice("View NPC details") and not pinScrollbar:IsShown(), "Back should restore the short parent menu")
+assert(PopupChoice("Add map pin")):Click()
+assert(PopupChoice("Elwynn Forest (26.2, 87.0)")):Click()
+assert(placed and placed[1] == 1429 and placed[2] == 0.2625 and placed[3] == 0.87,
+    "The pin must use the mapped UI map ID and preserve unrounded coordinates")
+assert(searchBox:GetText() == "mob", "Placing a pin must not replace the current search")
+reloadToggle("quest")
+local startQuest = assert(Result(function(entry) return entry.kind == "quest" and entry.id == 99 end))
+startQuest.scripts.OnClick(startQuest, "RightButton")
+assert(PopupChoice("Add map pin"), "A quest result should link to its known starter coordinates")
+local pinCheck = assert(ContextCheckbox(QuickItemSearchOptionsFrame, "Map pin actions"))
+local settingsPinCheck = assert(ContextCheckbox(addonOptions, "Map pin actions"))
+pinCheck:SetChecked(false)
+pinCheck:Click()
+assert(not settingsPinCheck:GetChecked(), "The pin setting should sync across the two menus")
+startQuest.scripts.OnClick(startQuest, "RightButton")
+assert(not PopupChoice("Add map pin") and PopupChoice("Open quest"), "Disabling pins must preserve other actions")
+assert(loadfile("UI.lua"))("QuickItemSearch", addon)
+addonOptions:Show()
+settingsPinCheck = assert(ContextCheckbox(addonOptions, "Map pin actions"))
+assert(not settingsPinCheck:GetChecked(), "The map pin setting must persist after reload")
+settingsPinCheck:SetChecked(true)
+settingsPinCheck:Click()
+SlashCmdList.QUICKITEMSEARCH("gather")
+local node = assert(Result(function(entry) return entry.kind == "text" and entry.areaID == 12 end))
+node.scripts.OnClick(node, "RightButton")
+assert(not PopupChoice("Add map pin"), "Gathering location rows must stay outside the pin menu")
+
+local canvas = Widget()
+canvas:SetSize(1000, 800)
+WorldMapFrame = Widget()
+function WorldMapFrame:GetCanvas() return canvas end
+function WorldMapFrame:GetMapID() return self.mapID end
+function WorldMapFrame:OnMapChanged() end
+function WorldMapFrame:SetMapID(id)
+    self.mapID = id
+    self:OnMapChanged()
+end
+function hooksecurefunc(object, method, after)
+    local before = object[method]
+    object[method] = function(self, ...)
+        before(self, ...)
+        after(self, ...)
+    end
+end
+C_Map.SetUserWaypoint = function() return false end
+local location = { kind = "text", name = "Elwynn Forest", areaID = 12, x = 32, y = 75, pinTargetName = "River Wolf" }
+function addon.Search() return { location } end
+SlashCmdList.QUICKITEMSEARCH("wolf coordinates")
+local coordinateRow = assert(Result(function(entry) return entry == location end))
+coordinateRow.scripts.OnClick(coordinateRow, "RightButton")
+assert(PopupChoice("Add map pin")):Click()
+local mapMarker = buttons[#buttons]
+assert(WorldMapFrame:GetMapID() == 1429 and mapMarker.parent == canvas and mapMarker:IsShown(),
+    "A rejected native waypoint must display a marker on the selected map")
+WorldMapFrame:SetMapID(1436)
+assert(not mapMarker:IsShown(), "A marker must not leak onto a different map")
+WorldMapFrame:SetMapID(1429)
+assert(mapMarker:IsShown(), "Returning to the pin's map must restore the marker")
+mapMarker.scripts.OnClick(mapMarker, "RightButton")
+assert(not mapMarker:IsShown(), "Right-click must remove the fallback map marker")
+
+assert(loadfile("SpellSearch.lua"))("QuickItemSearch", addon)
+LibQuestieDB.Quest.Get = function(_, field) if field == "name" then return "Find the River Wolf" end end
+local spellUnlock = {
+    kind = "spell", id = 501, name = "Kelp Draught", matchLabel = "Level 10 · Quest",
+    unlockLevel = 10, unlockSource = "Quest", unlockQuests = { { level = 10, quests = { 99 } } },
+}
+function addon.Search() return { spellUnlock } end
+SlashCmdList.QUICKITEMSEARCH("spell unlock")
+local unlockRow = assert(Result(function(entry) return entry == spellUnlock end))
+tooltipLines = {}
+unlockRow.scripts.OnEnter(unlockRow)
+assert(#tooltipLines == 1 and tooltipLines[1] == "Right-click for training details.",
+    "Spell hover should leave the unlock breakdown to the context menu")
+unlockRow.scripts.OnClick(unlockRow, "RightButton")
+assert(PopupChoice("How to learn")):Click()
+local learnQuest = PopupChoice("Open quest: Find the River Wolf\nMinimum level 10")
+assert(learnQuest and learnQuest.query == "@quest 99", "The unlock submenu must keep requirements with the linked quest")
+local liveWindow = QuickItemSearchFrame
+assert(liveWindow.scripts.OnKeyDown)
+liveWindow.scripts.OnKeyDown(liveWindow, "LEFT")
+assert(not PopupChoice("Back") and not PopupChoice("How to learn"),
+    "Left should close the entire context menu from a submenu")
 
 print("Window sizing and search options passed")

@@ -82,9 +82,18 @@ LibQuestieDB = { Quest = { Get = function(id, field)
 end } }
 GetAreaInfo = function(id) if id == 1519 then return "Stormwind City" end end
 C_CreatureInfo = { GetRaceInfo = function(id) if id == 1 then return { raceName = "Human" } end end }
+local unlockMenu = addon.GetResultRelatedQueries(questEntry)[1]
+assert(unlockMenu and unlockMenu.name == "How to learn" and unlockMenu.submenu,
+    "Class spell unlock details should have their own menu")
+local learnedQuest
+for _, choice in ipairs(unlockMenu.submenu) do
+    if choice.query == "@quest 1665" then learnedQuest = choice end
+end
+assert(learnedQuest and learnedQuest.name:find("Bartleby the Drunk", 1, true),
+    "The unlock menu should link to the known quest")
 addon.AppendSpellUnlockSources(tooltip, questEntry)
 local details = table.concat(lines, "\n")
-assert(details:find("Bartleby the Drunk (Quest 1665)", 1, true), "Quest tooltips should include the provider quest ID and optional name")
+assert(details:find("Bartleby the Drunk", 1, true), "The fallback tooltip should name known unlock quests")
 assert(details:find("Stormwind City", 1, true) and details:find("Human", 1, true), "Quest variants should show area and race restrictions")
 LibQuestieDB, GetAreaInfo, C_CreatureInfo = nil, nil, nil
 lines = {}

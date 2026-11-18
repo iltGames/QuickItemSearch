@@ -14,6 +14,11 @@ end
 
 addon.IsAutomaticSectionEnabled = IsAutomaticSectionEnabled
 
+function addon.IsVendorProximityEnabled()
+    local settings = _G[settingsKey]
+    return type(settings) ~= "table" or settings.nearestVendorsFirst ~= false
+end
+
 local searchShortcuts = {
     ["@target"] = "@target", ["@t"] = "@target",
     ["@me"] = "@me", ["@gear"] = "@me",
@@ -371,9 +376,123 @@ local function SearchByAction(query, itemMatches, exactCount)
     end
 end
 
+function addon.GetResultRelatedQueries(entry)
+    local choices, seen = {}, {}
+    local function Add(name, query)
+        if not seen[query] then
+            choices[#choices + 1] = { name = name, query = query }
+            seen[query] = true
+        end
+    end
+    local id, kind = entry.id, entry.kind
+    local db = _G.LibQuestieDB
+    local function AddQuest(questID)
+        local quests = db and db.Quest
+        local name = quests and quests.Get and quests.Get(questID, "name")
+        if type(name) == "string" and name ~= "" then Add("Open quest: " .. name, "@quest " .. questID) end
+    end
+    if not kind and id then
+        if addon.HasRecipesUsingItem and addon.HasRecipesUsingItem(id) then
+            Add("Show recipes using this", "usedin " .. id)
+        end
+        if addon.GetItemRecipes and addon.GetItemRecipes(id) then
+            Add("Show how to craft this", "@madeby " .. id)
+        end
+        local nodes = addon.GetGatheringNodes and addon.GetGatheringNodes(id)
+        if nodes and #nodes > 0 then
+            local locations = addon.GetGatheringLocations(id, nodes)
+            local label = "Show gathering requirements"
+            for _, rows in pairs(locations) do
+                if #rows > 0 then label = "Show where to gather"; break end
+            end
+            Add(label, "@gather " .. id)
+            Add("Find " .. nodes[1].gatheringProfession .. " trainers", "train " .. nodes[1].gatheringProfession)
+        end
+        for _, source in ipairs(addon.GetItemSources(id)) do
+            if source.kind ~= "quest" then
+                Add("Show item sources", "@sources " .. id)
+                break
+            end
+        end
+    elseif kind == "spell" then
+        local recipe = addon.GetRecipe and addon.GetRecipe(id)
+        if recipe then
+            local hasReagents = recipe[6] and #recipe[6] > 0
+            if hasReagents or recipe[5] then
+                local label = hasReagents and (recipe[5] and "Show reagents and crafted item" or "Show reagents")
+                    or "Show crafted item"
+                Add(label, "@recipe " .. id)
+            end
+            local profession = entry.profession or recipe[3]
+            Add("Find " .. profession .. " trainers", "train " .. profession)
+        end
+        if entry.unlockLevel and addon.GetSpellUnlockChoices then
+            local unlocks = addon.GetSpellUnlockChoices(entry)
+            if #unlocks > 0 then
+                table.insert(choices, 1, { name = "How to learn", submenu = unlocks, submenuType = "unlock" })
+            end
+        end
+    elseif kind == "quest" then
+        Add("Open quest", "@quest " .. id)
+    elseif kind == "dungeon" then
+        Add("View dungeon loot", "@dungeon " .. entry.name)
+    elseif kind == "npc" then
+        Add("View NPC details", "@npc " .. id)
+    elseif kind == "object" then
+        Add("Show object locations", "@object " .. id)
+    elseif kind == "text" then
+        local npcs = db and db.Npc
+        local canFindNPC = npcs and npcs.Get and npcs.GetAllIds
+        if entry.trainerName and canFindNPC then Add("Find " .. entry.trainerName, "@npc " .. entry.trainerName) end
+        if entry.tameSources then
+            for _, source in ipairs(entry.tameSources) do
+                local beast, zone, level = unpack(source)
+                local label = ("%s - lvl %s (%s)"):format(beast, level, zone)
+                if canFindNPC then
+                    Add("Find " .. label, "@npc " .. beast)
+                else
+                    choices[#choices + 1] = { name = label }
+                end
+            end
+            if #entry.tameSources == 0 then
+                choices[#choices + 1] = { name = "No known tame source for this rank." }
+            end
+        end
+    end
+    local entity = db and (kind == "npc" and db.Npc or kind == "object" and db.Object)
+    if entity and entity.Get then
+        for _, field in ipairs({ "questStarts", "questEnds" }) do
+            for _, questID in ipairs(entity.Get(id, field) or {}) do AddQuest(questID) end
+        end
+    end
+    if entry.relatedQuery then Add(entry.relatedLabel, entry.relatedQuery) end
+    return choices
+end
+
+local relatedSearches = {
+    ["@gather"] = "SearchGatheringLocations",
+    ["@sources"] = "SearchItemSources",
+    ["@object"] = "SearchObjectLocations",
+    ["@recipe"] = "SearchRecipeDetails",
+}
+
 function addon.Search(input)
     local query = input:match("^%s*(.-)%s*$")
     local lowerQuery = query:lower()
+    local related, target = lowerQuery:match("^(@%a+)%s+(%d+)$")
+    local relatedSearch = addon[relatedSearches[related]]
+    if relatedSearch then
+        local id = ParseID(target)
+        if not id then return {}, "Enter a valid ID." end
+        return relatedSearch(id)
+    end
+    if related == "@madeby" and addon.GetItemRecipes then
+        local id = ParseID(target)
+        if not id then return {}, "Enter a valid item ID." end
+        local rows = addon.GetItemRecipes(id)
+        return rows or {}, rows and "Recipes that make " .. (addon.index[id] or ("Item " .. id)):gsub("|", "||")
+            or "No indexed recipe makes this item."
+    end
     if addon.SearchClassSpellUnlocks then
         local rows, hint, load, title = addon.SearchClassSpellUnlocks(lowerQuery)
         if rows then

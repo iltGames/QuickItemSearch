@@ -134,31 +134,50 @@ local function RaceNames(ids)
     return table.concat(names, ", ")
 end
 
-function addon.AppendSpellUnlockSources(tooltip, entry)
-    if not entry.unlockLevel then return end
-    tooltip:AddLine(("Level %d · %s · What's Training"):format(entry.unlockLevel, entry.unlockSource), 1, 0.82, 0, true)
-    if entry.unlockFaction then tooltip:AddLine(entry.unlockFaction, 0.8, 0.8, 0.8) end
-    if entry.unlockRaces then tooltip:AddLine(RaceNames(entry.unlockRaces), 0.8, 0.8, 0.8, true) end
-    if entry.requiredTalentId then
-        tooltip:AddLine(("Requires talent (spell %d)."):format(entry.requiredTalentId), 0.8, 0.8, 0.8, true)
+function addon.GetSpellUnlockChoices(entry)
+    local choices = {}
+    if not entry.unlockLevel then return choices end
+    local function Add(name, query)
+        choices[#choices + 1] = { name = name, query = query }
     end
+    if entry.unlockSource == "Trainer" then
+        Add(("Learn from a class trainer at level %d."):format(entry.unlockLevel))
+    end
+    if entry.unlockFaction then Add("Faction: " .. entry.unlockFaction) end
+    local allowedRaces = RaceNames(entry.unlockRaces)
+    if allowedRaces ~= "" then Add("Races: " .. allowedRaces) end
+    if entry.requiredTalentId then
+        local name = C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(entry.requiredTalentId)
+        Add("Requires talent: " .. (name or ("Spell %d"):format(entry.requiredTalentId)))
+    end
+    local db = _G.LibQuestieDB
+    local quests = db and db.Quest
     for _, variant in ipairs(entry.unlockQuests or {}) do
         local races = RaceNames(variant.races)
-        tooltip:AddLine(("Quest unlock · Minimum level %d%s"):format(variant.level,
-            races ~= "" and (" · " .. races) or ""), 1, 0.82, 0, true)
+        local requirements = ("Minimum level %d%s"):format(variant.level, races ~= "" and (" · " .. races) or "")
+        local areas = {}
         for _, id in ipairs(variant.areas or {}) do
             local name = GetAreaInfo and GetAreaInfo(id)
-            tooltip:AddLine(name or ("Area %d"):format(id), 0.8, 0.8, 0.8, true)
+            areas[#areas + 1] = name or ("Area %d"):format(id)
         end
+        if #areas > 0 then requirements = requirements .. " · " .. table.concat(areas, ", ") end
+        if not variant.quests or #variant.quests == 0 then Add("Quest unlock\n" .. requirements) end
         for _, id in ipairs(variant.quests or {}) do
             local questName
-            local db = _G.LibQuestieDB
-            if db and db.Quest and db.Quest.Get then
-                local ok, name = pcall(db.Quest.Get, id, "name")
-                if ok and type(name) == "string" then questName = name end
+            if quests and quests.Get then
+                local ok, name = pcall(quests.Get, id, "name")
+                if ok and type(name) == "string" and name ~= "" then questName = name end
             end
-            tooltip:AddLine(questName and ("%s (Quest %d)"):format(questName, id) or ("Quest %d"):format(id), 1, 1, 1, true)
+            local label = questName and ("Open quest: " .. questName) or ("Quest %d"):format(id)
+            Add(label .. "\n" .. requirements, questName and ("@quest " .. id) or nil)
         end
+    end
+    return choices
+end
+
+function addon.AppendSpellUnlockSources(tooltip, entry)
+    for _, choice in ipairs(addon.GetSpellUnlockChoices(entry)) do
+        tooltip:AddLine((choice.name:gsub("|", "||")), 0.8, 0.8, 0.8, true)
     end
 end
 

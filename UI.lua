@@ -16,7 +16,7 @@ local ARROW_DIRECTION = { UP = -1, DOWN = 1 }
 local HISTORY_LIMITS = { 0, 5, 10, 20, 50 }
 local DEFAULT_HISTORY_LIMIT = 10
 local HISTORY_PAGE_SIZE = 10
-local QUEST_MENU_PAGE_SIZE = 8
+local RESULT_MENU_VISIBLE_ROWS = 8
 local MAX_QUERY_BYTES = 512
 local queryExamples = {
     "@me shield upgrade no sp",
@@ -56,7 +56,9 @@ local resizing, resizePreviewRows
 local arrowSelected, resultKeyboardActive, pressedResultEnter
 local heldArrow, arrowTimer
 local SEARCH_KEYS = "Up / Down   Navigate     Enter   Release Focus     Esc   Close"
-local RESULT_KEYS = "Up / Down   Navigate     Enter   Activate     Esc   Close"
+local RESULT_KEYS = "Up / Down   Browse    Enter / Right   Actions    Esc   Close"
+local MENU_KEYS = "Up / Down   Navigate     Enter   Choose     Left / Esc   Back"
+local EnableResultKeyboard
 local rows, results = {}, {}
 local primaryResults, resultSections
 local expandedSections
@@ -83,6 +85,18 @@ end
 
 local function QuestRewardLinksEnabled()
     return GetSettings().questRewardLinks ~= false
+end
+
+local function ResultContextMenusEnabled()
+    return GetSettings().resultContextMenus ~= false
+end
+
+local function MapPinActionsEnabled()
+    return GetSettings().mapPinActions ~= false
+end
+
+local function VendorZonesEnabled()
+    return GetSettings().vendorZones ~= false
 end
 
 local function GetHistoryLimit()
@@ -131,15 +145,6 @@ local function ItemRecipes(id)
     if addon.GetItemRecipes then return addon.GetItemRecipes(id) end
 end
 
-local function AppendCraftingSkills(tooltip, id)
-    for _, recipe in ipairs(ItemRecipes(id) or {}) do
-        if recipe.skillThresholds then
-            tooltip:AddLine(FormatSkillThresholds(recipe.profession, recipe.skillThresholds)
-                .. " - " .. recipe.name:gsub("|", "||"), 1, 1, 1, true)
-        end
-    end
-end
-
 local function UpdateRow(row)
     local entry = row.entry
     local name, _, quality, icon
@@ -148,6 +153,8 @@ local function UpdateRow(row)
         detail = FormatSkillThresholds(entry.gatheringProfession, entry.gatheringThresholds)
     elseif entry.skillThresholds then
         detail = FormatSkillThresholds(entry.profession, entry.skillThresholds)
+    elseif entry.vendorZone and VendorZonesEnabled() then
+        detail = detail .. " · " .. entry.vendorZone:gsub("|", "||")
     elseif not entry.kind then
         local recipes = ItemRecipes(entry.id)
         if recipes and #recipes == 1 and recipes[1].skillThresholds then
@@ -166,7 +173,7 @@ local function UpdateRow(row)
         icon = "Interface\\ChatFrame\\UI-ChatIcon-Chat-Up"
     elseif entry.kind == "quest" then
         icon = "Interface\\GossipFrame\\AvailableQuestIcon"
-    elseif entry.kind == "dungeon" or entry.kind == "npc" then
+    elseif entry.kind == "dungeon" or entry.kind == "npc" or entry.kind == "object" then
         icon = "Interface\\Icons\\INV_Misc_Map_01"
     elseif entry.kind == "spell" then
         icon = C_Spell.GetSpellTexture(entry.id)
@@ -202,7 +209,6 @@ local function UpdateRow(row)
 end
 
 local function SetRowSelected(row, isSelected)
-    isSelected = isSelected and not (row.entry and row.entry.sectionHeader)
     row.selection:SetShown(isSelected)
     row.selectionEdge:SetShown(isSelected)
 end
@@ -240,7 +246,7 @@ local function RenderResults()
             row:Hide()
         end
     end
-    if queryPopup.questItem and queryPopup.anchor.entry ~= queryPopup.questItem then queryPopup:Hide() end
+    if queryPopup.resultEntry and queryPopup.anchor.entry ~= queryPopup.resultEntry then queryPopup:Hide() end
 
     local visible = math.min(visibleRows, math.max(0, #results - firstVisible + 1))
     ResizePanel()
@@ -267,43 +273,47 @@ end
 local function ShowHover(row)
     local entry = row.entry
     if not entry or entry.sectionHeader or entry.toggleSection then return end
-    GameTooltip:SetOwner(row, "ANCHOR_RIGHT")
     if entry.kind == "text" or entry.kind == "emote" or entry.kind == "quest"
-        or entry.kind == "dungeon" or entry.kind == "npc" then
-        GameTooltip:AddLine((entry.name:gsub("|", "||")), 1, 1, 1, true)
+        or entry.kind == "dungeon" or entry.kind == "npc" or entry.kind == "object" then
+        local hint
         if entry.kind == "emote" then
-            GameTooltip:AddLine("Click to perform this emote.", 0.8, 0.8, 0.8)
+            hint = "Click to perform this emote."
         elseif entry.kind == "quest" then
-            GameTooltip:AddLine("Click to view quest details.", 0.8, 0.8, 0.8)
+            hint = "Click to view quest details."
         elseif entry.kind == "dungeon" then
-            GameTooltip:AddLine("Click to view dungeon loot.", 0.8, 0.8, 0.8)
-        elseif entry.kind == "npc" then
-            GameTooltip:AddLine("Click to view known locations.", 0.8, 0.8, 0.8)
+            hint = "Click to view dungeon loot."
+        elseif entry.kind == "npc" or entry.kind == "object" then
+            hint = "Click to view known locations."
         elseif entry.tameSources then
-            GameTooltip:AddLine(("Requires pet level %d to train."):format(entry.petTrainingLevel), 0.8, 0.8, 0.8)
-            local instructions = #entry.tameSources > 0 and "Tame one of these beasts and have it use the ability."
-                or "No known tame source for this rank."
-            GameTooltip:AddLine(instructions, 1, 0.82, 0, true)
-            for _, source in ipairs(entry.tameSources) do
-                local beast, zone, level = unpack(source)
-                GameTooltip:AddLine(("%s - %s (Level %s)"):format(beast, zone, level), 1, 1, 1, true)
-            end
-        elseif entry.description then
+            hint = ResultContextMenusEnabled() and "Right-click for training details." or "Click for training details."
+        elseif ResultContextMenusEnabled() and MapPinActionsEnabled()
+            and (entry.pinEntity or (entry.pinTargetName and entry.x)) and #addon.GetResultMapPins(entry) > 0 then
+            hint = "Right-click to add a map pin."
+        end
+        local clippedDetail = row.idLabel:IsTruncated()
+        if not (hint or entry.description or row.label:IsTruncated() or clippedDetail) then return end
+        GameTooltip:SetOwner(row, "ANCHOR_RIGHT")
+        GameTooltip:AddLine((entry.name:gsub("|", "||")), 1, 1, 1, true)
+        if clippedDetail then GameTooltip:AddLine(row.idLabel:GetText(), 0.8, 0.8, 0.8, true) end
+        if hint then GameTooltip:AddLine(hint, 0.8, 0.8, 0.8, true) end
+        if entry.description then
             GameTooltip:AddLine((entry.description:gsub("|", "||")), 0.8, 0.8, 0.8, true)
         end
         GameTooltip:Show()
         return
     end
+    GameTooltip:SetOwner(row, "ANCHOR_RIGHT")
     if entry.kind == "spell" then
         local shown = pcall(GameTooltip.SetSpellByID, GameTooltip, entry.id, false, true)
         if not shown or GameTooltip:NumLines() == 0 then
             GameTooltip:AddLine((entry.name:gsub("|", "||")))
             GameTooltip:AddLine(("Spell %d"):format(entry.id), 0.8, 0.8, 0.8)
         end
-        if entry.skillThresholds then
-            GameTooltip:AddLine(FormatSkillThresholds(entry.profession, entry.skillThresholds))
+        if entry.unlockLevel and ResultContextMenusEnabled() then
+            GameTooltip:AddLine("Right-click for training details.", 0.8, 0.8, 0.8, true)
+        elseif addon.AppendSpellUnlockSources then
+            addon.AppendSpellUnlockSources(GameTooltip, entry)
         end
-        if addon.AppendSpellUnlockSources then addon.AppendSpellUnlockSources(GameTooltip, entry) end
         GameTooltip:Show()
         return
     end
@@ -313,9 +323,24 @@ local function ShowHover(row)
         GameTooltip:AddLine((label:gsub("|", "||")))
         GameTooltip:AddLine("Click to request item details.", 0.8, 0.8, 0.8, true)
     end
-    local hasRequirement, hasReward = addon.AppendItemSources(GameTooltip, entry.id)
-    AppendCraftingSkills(GameTooltip, entry.id)
-    if hasRequirement or (hasReward and QuestRewardLinksEnabled()) then
+    local sources = addon.GetItemSources(entry.id)
+    local hasRelated
+    if ResultContextMenusEnabled() then
+        local nodes = addon.GetGatheringNodes and addon.GetGatheringNodes(entry.id)
+        hasRelated = ItemRecipes(entry.id) or (nodes and #nodes > 0)
+            or (addon.HasRecipesUsingItem and addon.HasRecipesUsingItem(entry.id))
+        if not hasRelated then
+            for _, source in ipairs(sources) do
+                if source.kind ~= "quest" then
+                    hasRelated = true
+                    break
+                end
+            end
+        end
+    end
+    if hasRelated then
+        GameTooltip:AddLine("Right-click for related results.", 0.8, 0.8, 0.8, true)
+    elseif #addon.GetItemQuestChoices(entry.id, QuestRewardLinksEnabled(), sources) > 0 then
         GameTooltip:AddLine("Right-click to open a quest.", 0.8, 0.8, 0.8, true)
     end
     GameTooltip:Show()
@@ -383,7 +408,11 @@ local function ReleaseResultKeyboard()
 end
 
 local function CanActivate(entry)
-    return entry and (entry.toggleSection or entry.kind ~= "text")
+    if not entry then return false end
+    if entry.kind ~= "text" or entry.toggleSection or entry.tameSources then return true end
+    if not ResultContextMenusEnabled() then return false end
+    return entry.relatedQuery or entry.trainerName
+        or (MapPinActionsEnabled() and (entry.pinEntity or (entry.pinTargetName and entry.x)))
 end
 
 local function RenderSearchSections(collapsedTitle)
@@ -415,8 +444,13 @@ local function RenderSearchSections(collapsedTitle)
     RenderResults()
 end
 
-local function ShowResults(matches, hint, answerText, sections)
-    ReleaseResultKeyboard()
+local function ShowResults(matches, hint, answerText, sections, preserveKeyboard)
+    if preserveKeyboard and resultKeyboardActive then
+        StopArrowRepeat()
+        arrowSelected, pressedResultEnter = nil, nil
+    else
+        ReleaseResultKeyboard()
+    end
     primaryResults = matches
     if answerText then
         primaryResults = {}
@@ -479,7 +513,7 @@ local function SearchNow()
                 UpdateQuestDetails(loadedMatches, loadedHint)
                 return
             end
-            ShowResults(loadedMatches, loadedHint, loadedAnswer, loadedSections)
+            ShowResults(loadedMatches, loadedHint, loadedAnswer, loadedSections, true)
         end)
     end
 end
@@ -496,15 +530,8 @@ local function OpenItem(link, action)
         local itemString = link:match("|H([^|]+)|h")
         if itemString then
             SetItemRef(itemString, link, "LeftButton")
-            if ItemRefTooltip and ItemRefTooltip:IsShown() then
-                local _, shownLink = ItemRefTooltip:GetItem()
-                local itemID = tonumber(itemString:match("^item:(%d+)"))
-                if shownLink and tonumber(shownLink:match("|Hitem:(%d+)")) == itemID then
-                    addon.AppendItemSources(ItemRefTooltip, itemID)
-                    AppendCraftingSkills(ItemRefTooltip, itemID)
-                    ItemRefTooltip:Show()
-                end
-            end
+            local itemID = tonumber(itemString:match("^item:(%d+)"))
+            if itemID then addon.GetItemSources(itemID) end
         end
     end
 end
@@ -520,10 +547,16 @@ local function SelectResult(entry)
         RenderSearchSections(wasExpanded and title or nil)
         return
     end
-    if entry.kind == "text" then return end
+    if entry.kind == "text" then
+        if entry.tameSources then
+            local row = rows[selected - firstVisible + 1]
+            if row then queryPopup.ShowResultChoices(row, true) end
+        end
+        return
+    end
     searchBox:ClearFocus()
     RememberQuery(searchBox:GetText())
-    if entry.kind == "quest" or entry.kind == "dungeon" or entry.kind == "npc" then
+    if entry.kind == "quest" or entry.kind == "dungeon" or entry.kind == "npc" or entry.kind == "object" then
         local continueKeyboardNavigation = resultKeyboardActive
         local target = entry.kind == "dungeon" and entry.name or id
         searchBox:SetText("@" .. entry.kind .. " " .. target)
@@ -758,9 +791,33 @@ local function SetButtonTooltip(button, label)
     button:SetScript("OnHide", HideButtonTooltip)
 end
 
+local function CreateListScrollbar(parent, onWheel, onValueChanged)
+    local slider = CreateFrame("Slider", nil, parent)
+    slider:SetOrientation("VERTICAL")
+    slider:SetWidth(SCROLLBAR_WIDTH)
+    slider:SetValueStep(1)
+    slider:SetObeyStepOnDrag(true)
+    slider:EnableMouse(true)
+    slider:EnableMouseWheel(true)
+    slider:SetScript("OnMouseWheel", onWheel)
+    local track = slider:CreateTexture(nil, "BACKGROUND")
+    track:SetPoint("TOP")
+    track:SetPoint("BOTTOM")
+    track:SetWidth(4)
+    track:SetColorTexture(unpack(COLORS.trim))
+    local thumb = slider:CreateTexture(nil, "ARTWORK")
+    thumb:SetSize(7, 16)
+    thumb:SetColorTexture(unpack(COLORS.accent))
+    slider:SetThumbTexture(thumb)
+    slider:SetScript("OnValueChanged", onValueChanged)
+    slider:Hide()
+    return slider
+end
+
 local function CreateQueryPopup()
     local rowHeight = 24
     local popupWidth, fieldInset, fieldGap, fieldHeight = 378, 12, 6, 22
+    local scrollTo, firstChoice, syncingScroll
     queryPopup = CreateFrame("Frame", nil, frame, "BackdropTemplate")
     queryPopup:SetWidth(popupWidth)
     queryPopup:SetFrameStrata("FULLSCREEN_DIALOG")
@@ -770,9 +827,19 @@ local function CreateQueryPopup()
     queryPopup:SetBackdropColor(unpack(COLORS.panel))
     queryPopup:SetBackdropBorderColor(unpack(COLORS.border))
     queryPopup:SetScript("OnHide", function(self)
-        self.questItem, self.showingHistory = nil, nil
+        self.resultEntry, self.showingHistory = nil, nil
+        scrollTo = nil
+        if resultKeyboardActive then keyboardHint:SetText(RESULT_KEYS) end
     end)
     queryPopup:Hide()
+
+    local function OnPopupMouseWheel(_, direction)
+        if scrollTo and direction ~= 0 then scrollTo(firstChoice + (direction > 0 and -1 or 1)) end
+    end
+    queryPopup:SetScript("OnMouseWheel", OnPopupMouseWheel)
+    local popupScrollbar = CreateListScrollbar(queryPopup, OnPopupMouseWheel, function(_, value)
+        if scrollTo and not syncingScroll then scrollTo(math.floor(value + 0.5)) end
+    end)
 
     local empty = queryPopup:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     empty:SetPoint("TOPLEFT", 12, -13)
@@ -781,6 +848,11 @@ local function CreateQueryPopup()
     local popupSummary = queryPopup:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     popupSummary:SetPoint("TOPLEFT", 12, -10)
     popupSummary:Hide()
+
+    local popupInstructions = queryPopup:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    popupInstructions:SetPoint("TOPLEFT", popupSummary, "BOTTOMLEFT", 0, -4)
+    popupInstructions:SetText("Tame a beast below and have it use this ability.")
+    popupInstructions:Hide()
 
     local shortcutsTop = 26
     local filtersTop = shortcutsTop + fieldHeight + fieldGap
@@ -834,12 +906,13 @@ local function CreateQueryPopup()
 
     local buttons = {}
     queryPopup.buttons = buttons
-    for index = 1, math.max(HISTORY_PAGE_SIZE + 2, #queryExamples, QUEST_MENU_PAGE_SIZE + 2) do
+    for index = 1, math.max(HISTORY_PAGE_SIZE + 2, #queryExamples, RESULT_MENU_VISIBLE_ROWS + 1) do
         local button = CreateFrame("Button", nil, queryPopup)
         button:SetHeight(rowHeight)
         local highlight = button:CreateTexture(nil, "HIGHLIGHT")
         highlight:SetAllPoints()
         highlight:SetColorTexture(unpack(COLORS.hover))
+        button:SetHighlightTexture(highlight)
         button.label = button:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
         button.label:SetPoint("LEFT", 7, 0)
         button.label:SetPoint("RIGHT", -7, 0)
@@ -850,20 +923,27 @@ local function CreateQueryPopup()
                 self.changePage()
                 return
             end
+            if self.action then
+                queryPopup:Hide()
+                self.action()
+                return
+            end
             local query = self.query
-            if queryPopup.questItem then RememberQuery(searchBox:GetText()) end
+            if not query then return end
+            local continueKeyboard = queryPopup.fromKeyboard and queryPopup.resultEntry
+            if queryPopup.resultEntry then RememberQuery(searchBox:GetText()) end
             queryPopup:Hide()
             RememberQuery(query)
             searchBox:SetText(query)
             SearchNow()
             searchBox:SetCursorPosition(#query)
-            searchBox:ClearFocus()
+            if continueKeyboard then searchBox:SetFocus() else searchBox:ClearFocus() end
         end)
         buttons[index] = button
     end
 
-    local function ShowChoices(owner, choices, questMenu, pageStart)
-        if not pageStart and queryPopup:IsShown() and queryPopup.anchor == owner then
+    local function ShowChoices(owner, choices, resultMenu, start, parentChoices)
+        if not start and queryPopup:IsShown() and queryPopup.anchor == owner then
             queryPopup:Hide()
             return
         end
@@ -871,64 +951,186 @@ local function CreateQueryPopup()
         local displayed = choices
         local isHistory = choices == history
         local historyOff = isHistory and GetHistoryLimit() == 0
-        local heading = questMenu and "Open quest" or "Recent searches"
-        local pageSize = questMenu and QUEST_MENU_PAGE_SIZE or HISTORY_PAGE_SIZE
-        if (questMenu or isHistory) and #choices > pageSize then
-            local units = questMenu and "quests" or "searches"
-            local first = pageStart or 1
-            local last = math.min(#choices, first + pageSize - 1)
+        local heading = resultMenu == "quests" and "Open quest" or resultMenu and "Related results" or "Recent searches"
+        local unlockMenu = resultMenu == "unlock"
+        if parentChoices then heading = unlockMenu and "How to learn" or "Add map pin" end
+        local petMenu = resultMenu == "beasts"
+        local showInstructions = petMenu and #owner.entry.tameSources > 0
+        if petMenu then heading = ("Requires pet level %d to train"):format(owner.entry.petTrainingLevel) end
+        local limit = resultMenu and RESULT_MENU_VISIBLE_ROWS or HISTORY_PAGE_SIZE
+        local first = start or 1
+        local overflow = (resultMenu or isHistory) and #choices > limit
+        local canScroll = resultMenu ~= nil and overflow
+        if overflow then
+            local last = math.min(#choices, first + limit - 1)
             displayed = {}
-            if first > 1 then
-                displayed[#displayed + 1] = { name = "Previous " .. units, page = first - pageSize }
+            if isHistory and first > 1 then
+                displayed[#displayed + 1] = { name = "Previous searches", page = first - limit }
             end
             for i = first, last do displayed[#displayed + 1] = choices[i] end
-            if last < #choices then
-                displayed[#displayed + 1] = { name = "Next " .. units, page = last + 1 }
+            if isHistory and last < #choices then
+                displayed[#displayed + 1] = { name = "Next searches", page = last + 1 }
             end
             heading = ("%s · %d–%d of %d"):format(heading, first, last, #choices)
         end
+        if parentChoices then displayed = { { name = "Back", back = true }, unpack(displayed) } end
         local showFields = choices == queryExamples
         fields:SetShown(showFields)
         popupSummary:SetText(heading)
         popupSummary:SetShown(not showFields)
-        local fieldsOffset = showFields and fieldsHeight or 22
+        popupInstructions:SetShown(showInstructions)
+        local fieldsOffset = showFields and fieldsHeight or (showInstructions and 38 or 22)
+        local choiceHeight = unlockMenu and 48 or petMenu and 34 or rowHeight
+        firstChoice = first
+        scrollTo = nil
+        queryPopup:EnableMouseWheel(canScroll)
+        popupScrollbar:SetShown(canScroll)
+        if canScroll then
+            local lastStart = #choices - limit + 1
+            scrollTo = function(value)
+                local nextStart = Clamp(value, 1, lastStart)
+                if nextStart == firstChoice then return end
+                ShowChoices(owner, choices, resultMenu, nextStart, parentChoices)
+                return true
+            end
+            local height = limit * choiceHeight
+            local top = -5 - fieldsOffset - (parentChoices and choiceHeight or 0)
+            popupScrollbar:SetPoint("TOPRIGHT", -5, top)
+            popupScrollbar:SetHeight(height)
+            popupScrollbar:SetStepsPerPage(limit)
+            popupScrollbar:GetThumbTexture():SetHeight(math.max(16, height * limit / #choices))
+            syncingScroll = true
+            popupScrollbar:SetMinMaxValues(1, lastStart)
+            popupScrollbar:SetValue(first)
+            syncingScroll = false
+        end
+
         queryPopup.selected = 0
         queryPopup.count = #displayed
+        queryPopup.hasBack = parentChoices ~= nil
         for index, row in ipairs(buttons) do
             row:UnlockHighlight()
             local choice = displayed[index]
             local page = type(choice) == "table" and choice.page
-            row.changePage = page and function() ShowChoices(owner, choices, questMenu, page) end or nil
-            row.query = nil
+            row.changePage, row.action, row.query = nil, nil, nil
             if choice then
-                local top = -5 - fieldsOffset - (index - 1) * rowHeight
+                local top = -5 - fieldsOffset - (index - 1) * choiceHeight
                 row:ClearAllPoints()
                 row:SetPoint("TOPLEFT", 5, top)
-                row:SetPoint("TOPRIGHT", -5, top)
+                row:SetPoint("TOPRIGHT", -5 - (canScroll and SCROLLBAR_WIDTH or 0), top)
+                row:SetHeight(choiceHeight)
+                row.label:SetWordWrap(petMenu or unlockMenu)
                 local display = type(choice) == "table" and choice.name or (choice:match("|H.-|h(.-)|h") or choice)
                 row.label:SetText((display:gsub("|", "||")))
-                if not page then row.query = questMenu and ("@quest " .. choice.id) or choice end
+                if page then
+                    row.changePage = function() ShowChoices(owner, choices, resultMenu, page, parentChoices) end
+                elseif resultMenu then
+                    if choice.submenu then
+                        row.changePage = function()
+                            ShowChoices(owner, choice.submenu, choice.submenuType or "locations", 1, choices)
+                        end
+                    elseif choice.back then
+                        row.changePage = function() ShowChoices(owner, parentChoices, "results", 1) end
+                    else
+                        row.query, row.action = choice.query, choice.action
+                    end
+                else
+                    row.query = choice
+                end
             end
+            row:SetEnabled(not not (row.changePage or row.action or row.query))
             row:SetShown(choice ~= nil)
         end
         empty:ClearAllPoints()
         empty:SetPoint("TOPLEFT", 12, -13 - fieldsOffset)
         empty:SetText(historyOff and "Search history is off" or "No recent searches")
         empty:SetShown(#displayed == 0)
-        queryPopup:SetHeight(10 + fieldsOffset + math.max(1, #displayed) * rowHeight)
+        queryPopup:SetHeight(10 + fieldsOffset + math.max(1, #displayed) * choiceHeight)
         queryPopup.anchor = owner
-        queryPopup.questItem = questMenu and owner.entry or nil
+        queryPopup.resultEntry = resultMenu and owner.entry or nil
         queryPopup.showingHistory = isHistory
         queryPopup:ClearAllPoints()
-        if questMenu then
+        if resultMenu then
             queryPopup:SetPoint("TOPLEFT", owner, "TOPRIGHT", 5, 0)
         else
             queryPopup:SetPoint("TOPRIGHT", owner, "BOTTOMRIGHT", 0, -5)
         end
         queryPopup:Show()
-        if questMenu then searchBox:ClearFocus() else searchBox:SetFocus() end
+        if resultMenu then
+            searchBox:ClearFocus()
+            if not InCombatLockdown() then
+                EnableResultKeyboard()
+                keyboardHint:SetText(MENU_KEYS)
+            end
+        else
+            searchBox:SetFocus()
+        end
     end
-    function queryPopup.ShowQuests(owner, quests) ShowChoices(owner, quests, true) end
+    function queryPopup.MoveSelection(delta)
+        if queryPopup.count == 0 then return end
+        local previous = queryPopup.selected
+        local nextIndex = Clamp(previous + delta, 1, queryPopup.count)
+        local firstRow = queryPopup.hasBack and 2 or 1
+        if scrollTo and ((delta > 0 and previous == queryPopup.count) or (delta < 0 and previous == firstRow)) then
+            if scrollTo(firstChoice + delta) then nextIndex = previous end
+        end
+        if buttons[previous] then buttons[previous]:UnlockHighlight() end
+        queryPopup.selected = nextIndex
+        buttons[nextIndex]:LockHighlight()
+    end
+
+    function queryPopup.ActivateChoice()
+        local index = queryPopup.selected
+        if index == 0 then
+            for i = 1, queryPopup.count do
+                local button = buttons[i]
+                if button.query or button.action or button.changePage then index = i; break end
+            end
+        end
+        if index == 0 then return end
+        queryPopup.fromKeyboard = true
+        buttons[index]:Click()
+        queryPopup.fromKeyboard = nil
+    end
+
+    function queryPopup.ShowResultChoices(owner, primary)
+        local entry = owner.entry
+        if not entry or entry.sectionHeader or entry.toggleSection then return end
+        local enabled = ResultContextMenusEnabled()
+        local choices = (enabled or (primary and entry.tameSources)) and addon.GetResultRelatedQueries(entry) or {}
+        if enabled and MapPinActionsEnabled() then
+            local locations = addon.GetResultMapPins(entry)
+            local pinChoices = {}
+            for _, location in ipairs(locations) do
+                pinChoices[#pinChoices + 1] = {
+                    name = location.label,
+                    action = function()
+                        local placed = addon.AddResultMapPin(location)
+                        SetActionMessage(placed and ("Map pin added · " .. location.label) or "Unable to add a map pin.")
+                    end,
+                }
+            end
+            if #pinChoices == 1 then
+                table.insert(choices, 1, { name = "Add map pin", action = pinChoices[1].action })
+            elseif #pinChoices > 1 then
+                table.insert(choices, 1, { name = "Add map pin", submenu = pinChoices })
+            end
+        end
+        local related = #choices > 0
+        if not entry.kind then
+            for _, quest in ipairs(addon.GetItemQuestChoices(entry.id, QuestRewardLinksEnabled())) do
+                local label = quest.required and quest.reward and "Required and rewarded by"
+                    or quest.reward and "Reward from" or "Required for"
+                choices[#choices + 1] = { name = label .. ": " .. quest.name, query = "@quest " .. quest.id }
+            end
+        end
+        if #choices > 0 then
+            ShowChoices(owner, choices, entry.tameSources and "beasts" or related and "results" or "quests")
+            return queryPopup:IsShown()
+        else
+            queryPopup:Hide()
+        end
+    end
 
     local function AddPopupButton(label, icon, right, queries)
         local button = CreateFrame("Button", nil, frame)
@@ -947,6 +1149,29 @@ local function CreateQueryPopup()
     AddPopupButton("Examples", "Interface\\Icons\\INV_Misc_Book_09", -11, queryExamples)
 end
 
+local function OpenSelectedMenu(highlightFirst)
+    local row = rows[selected - firstVisible + 1]
+    if not row or not queryPopup.ShowResultChoices(row) then return false end
+    if highlightFirst then queryPopup.MoveSelection(1) end
+    return true
+end
+
+local function UseResultArrow(key)
+    local entry = results[selected]
+    if entry and entry.toggleSection then
+        local expand = key == "RIGHT"
+        if expand ~= (expandedSections[entry.toggleSection] == true) then
+            if GetCurrentKeyBoardFocus() == searchBox then
+                searchBox:ClearFocus()
+                EnableResultKeyboard()
+            end
+            SelectResult(entry)
+        end
+    elseif key == "RIGHT" then
+        OpenSelectedMenu(true)
+    end
+end
+
 local function OnResultKeyDown(self, key)
     if InCombatLockdown() then
         ReleaseResultKeyboard()
@@ -955,6 +1180,28 @@ local function OnResultKeyDown(self, key)
     local navigating = not GetCurrentKeyBoardFocus()
     local arrow = navigating and ARROW_DIRECTION[key]
     local enter = navigating and (key == "ENTER" or key == "NUMPADENTER")
+    if navigating and (key == "LEFT" or (key == "ESCAPE" and queryPopup.resultEntry)) then
+        self:SetPropagateKeyboardInput(false)
+        pressedResultEnter = nil
+        if queryPopup.resultEntry then
+            queryPopup:Hide()
+        else
+            UseResultArrow(key)
+        end
+        return
+    end
+    if navigating and key == "RIGHT" then
+        self:SetPropagateKeyboardInput(false)
+        pressedResultEnter = nil
+        if not queryPopup.resultEntry then UseResultArrow(key) end
+        return
+    end
+    if arrow and queryPopup.resultEntry then
+        self:SetPropagateKeyboardInput(false)
+        pressedResultEnter = nil
+        queryPopup.MoveSelection(arrow)
+        return
+    end
     self:SetPropagateKeyboardInput(not (arrow or enter))
     if arrow then
         pressedResultEnter = nil
@@ -962,7 +1209,7 @@ local function OnResultKeyDown(self, key)
     elseif enter then
         StopArrowRepeat()
         pressedResultEnter = key
-    else
+    elseif not queryPopup.resultEntry then
         ReleaseResultKeyboard()
     end
 end
@@ -971,10 +1218,23 @@ local function OnResultKeyUp(_, key)
     if key == heldArrow then StopArrowRepeat() end
     if key ~= pressedResultEnter then return end
     pressedResultEnter = nil
-    local entry = results[selected]
-    if CanActivate(entry) and not InCombatLockdown() and not GetCurrentKeyBoardFocus() then
-        SelectResult(entry)
+    if InCombatLockdown() or GetCurrentKeyBoardFocus() then return end
+    if queryPopup.resultEntry then
+        queryPopup.ActivateChoice()
+        return
     end
+    local entry = results[selected]
+    if CanActivate(entry) and not OpenSelectedMenu() then SelectResult(entry) end
+end
+
+EnableResultKeyboard = function()
+    if resultKeyboardActive then return end
+    resultKeyboardActive = true
+    frame:SetPropagateKeyboardInput(true)
+    frame:SetScript("OnKeyDown", OnResultKeyDown)
+    frame:SetScript("OnKeyUp", OnResultKeyUp)
+    frame:EnableKeyboard(true)
+    keyboardHint:SetText(RESULT_KEYS)
 end
 
 local function RefreshSearchPreferences()
@@ -1041,8 +1301,60 @@ local function CreateSearchPreferences(panel, anchor, margin)
     rewardLinks:SetHitRectInsets(0, -rewardLabel:GetStringWidth() - 1, 0, 0)
     rewardLinks:SetScript("OnClick", function(self)
         GetSettings().questRewardLinks = not not self:GetChecked()
-        if queryPopup and queryPopup.questItem then queryPopup:Hide() end
+        if queryPopup and queryPopup.resultEntry then queryPopup:Hide() end
         RefreshSearchPreferences()
+    end)
+
+    local contextMenus = CreateFrame("CheckButton", nil, panel, "UICheckButtonTemplate")
+    contextMenus:SetSize(24, 24)
+    contextMenus:SetPoint("TOPLEFT", rewardLinks, "BOTTOMLEFT", 0, 0)
+    local contextLabel = contextMenus:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+    contextLabel:SetPoint("LEFT", contextMenus, "RIGHT", 1, 0)
+    contextLabel:SetText("Result context menus")
+    contextMenus:SetHitRectInsets(0, -contextLabel:GetStringWidth() - 1, 0, 0)
+    contextMenus:SetScript("OnClick", function(self)
+        GetSettings().resultContextMenus = not not self:GetChecked()
+        if queryPopup and queryPopup.resultEntry then queryPopup:Hide() end
+        RefreshSearchPreferences()
+    end)
+
+    local mapPinActions = CreateFrame("CheckButton", nil, panel, "UICheckButtonTemplate")
+    mapPinActions:SetSize(24, 24)
+    mapPinActions:SetPoint("TOPLEFT", contextMenus, "BOTTOMLEFT", 0, 0)
+    local pinLabel = mapPinActions:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+    pinLabel:SetPoint("LEFT", mapPinActions, "RIGHT", 1, 0)
+    pinLabel:SetText("Map pin actions")
+    mapPinActions:SetHitRectInsets(0, -pinLabel:GetStringWidth() - 1, 0, 0)
+    mapPinActions:SetScript("OnClick", function(self)
+        GetSettings().mapPinActions = not not self:GetChecked()
+        if queryPopup and queryPopup.resultEntry then queryPopup:Hide() end
+        RefreshSearchPreferences()
+    end)
+
+    local vendorZones = CreateFrame("CheckButton", nil, panel, "UICheckButtonTemplate")
+    vendorZones:SetSize(24, 24)
+    vendorZones:SetPoint("TOPLEFT", mapPinActions, "BOTTOMLEFT", 0, 0)
+    local vendorZoneLabel = vendorZones:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+    vendorZoneLabel:SetPoint("LEFT", vendorZones, "RIGHT", 1, 0)
+    vendorZoneLabel:SetText("Vendor zones")
+    vendorZones:SetHitRectInsets(0, -vendorZoneLabel:GetStringWidth() - 1, 0, 0)
+    vendorZones:SetScript("OnClick", function(self)
+        GetSettings().vendorZones = not not self:GetChecked()
+        RefreshSearchPreferences()
+        if frame and frame:IsShown() then RenderResults() end
+    end)
+
+    local nearestVendors = CreateFrame("CheckButton", nil, panel, "UICheckButtonTemplate")
+    nearestVendors:SetSize(24, 24)
+    nearestVendors:SetPoint("TOPLEFT", vendorZones, "BOTTOMLEFT", 0, 0)
+    local nearestLabel = nearestVendors:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+    nearestLabel:SetPoint("LEFT", nearestVendors, "RIGHT", 1, 0)
+    nearestLabel:SetText("Nearest vendors first")
+    nearestVendors:SetHitRectInsets(0, -nearestLabel:GetStringWidth() - 1, 0, 0)
+    nearestVendors:SetScript("OnClick", function(self)
+        GetSettings().nearestVendorsFirst = not not self:GetChecked()
+        RefreshSearchPreferences()
+        if frame and frame:IsShown() then SearchNow() end
     end)
 
     local function Refresh()
@@ -1050,6 +1362,10 @@ local function CreateSearchPreferences(panel, anchor, margin)
         for limit, button in pairs(limitButtons) do button:SetEnabled(limit ~= current) end
         for section, check in pairs(checks) do check:SetChecked(addon.IsAutomaticSectionEnabled(section)) end
         rewardLinks:SetChecked(QuestRewardLinksEnabled())
+        contextMenus:SetChecked(ResultContextMenusEnabled())
+        mapPinActions:SetChecked(MapPinActionsEnabled())
+        vendorZones:SetChecked(VendorZonesEnabled())
+        nearestVendors:SetChecked(addon.IsVendorProximityEnabled())
     end
     panel:HookScript("OnShow", Refresh)
     return Refresh
@@ -1058,7 +1374,7 @@ end
 local function CreateCompactOptions()
     local width = 272
     local panel = CreateFrame("Frame", "QuickItemSearchOptionsFrame", frame, "BackdropTemplate")
-    panel:SetSize(width, 154 + math.ceil(#addon.automaticSections / 2) * 24)
+    panel:SetSize(width, 250 + math.ceil(#addon.automaticSections / 2) * 24)
     panel:SetFrameStrata("DIALOG")
     panel:SetFrameLevel(frame:GetFrameLevel() + 5)
     panel:SetClampedToScreen(true)
@@ -1132,17 +1448,21 @@ local function CreateSearchControls()
         if debounce then debounce:Cancel() end
         debounce = C_Timer.NewTimer(0.15, SearchNow)
     end)
-    searchBox:SetScript("OnArrowPressed", function(_, key)
+    searchBox:SetScript("OnArrowPressed", function(self, key)
         if queryPopup:IsShown() and ARROW_DIRECTION[key] then
-            if queryPopup.count == 0 then return end
-            local previous = queryPopup.buttons[queryPopup.selected]
-            if previous then previous:UnlockHighlight() end
-            queryPopup.selected = Clamp(queryPopup.selected + ARROW_DIRECTION[key], 1, queryPopup.count)
-            queryPopup.buttons[queryPopup.selected]:LockHighlight()
+            queryPopup.MoveSelection(ARROW_DIRECTION[key])
             return
         end
         if debounce then SearchNow() end
-        if ARROW_DIRECTION[key] then PressArrow(key) end
+        if key == "RIGHT" and arrowSelected and not InCombatLockdown() then
+            UseResultArrow(key)
+        elseif ARROW_DIRECTION[key] then
+            if key == "DOWN" and #results > 0 and not InCombatLockdown() then
+                self:ClearFocus()
+                EnableResultKeyboard()
+            end
+            PressArrow(key)
+        end
     end)
     searchBox:HookScript("OnKeyUp", function(_, key)
         if key == heldArrow then StopArrowRepeat() end
@@ -1156,19 +1476,12 @@ local function CreateSearchControls()
         end
         queryPopup:Hide()
         RememberQuery(self:GetText())
+        if debounce then SearchNow() end
         local entry = arrowSelected and results[selected]
         ReleaseResultKeyboard()
         self:ClearFocus()
-        if not CanActivate(entry) then return end
-        if not InCombatLockdown() then
-            resultKeyboardActive = true
-            frame:SetPropagateKeyboardInput(true)
-            frame:SetScript("OnKeyDown", OnResultKeyDown)
-            frame:SetScript("OnKeyUp", OnResultKeyUp)
-            frame:EnableKeyboard(true)
-            keyboardHint:SetText(RESULT_KEYS)
-        end
-        SelectResult(entry)
+        if not InCombatLockdown() then EnableResultKeyboard() end
+        if CanActivate(entry) and not OpenSelectedMenu() then SelectResult(entry) end
     end)
     searchBox:SetScript("OnEscapePressed", function()
         if queryPopup:IsShown() then queryPopup:Hide()
@@ -1260,11 +1573,11 @@ local function CreateWindow()
             if hoveredRow == self then HideHover() end
         end)
         row:SetScript("OnClick", function(self, button)
-            if not self.entry or self.entry.sectionHeader then return end
+            if not self.entry then return end
             if button == "RightButton" then
-                if not self.entry.kind then
-                    local quests = addon.GetItemQuestChoices(self.entry.id, QuestRewardLinksEnabled())
-                    if #quests > 0 then queryPopup.ShowQuests(self, quests) else queryPopup:Hide() end
+                if queryPopup.ShowResultChoices(self) then
+                    selected = self.resultIndex
+                    for _, visible in ipairs(rows) do SetRowSelected(visible, visible == self) end
                 end
                 return
             end
@@ -1273,7 +1586,12 @@ local function CreateWindow()
             for _, visible in ipairs(rows) do
                 SetRowSelected(visible, visible == self)
             end
-            SelectResult(self.entry)
+            local entry = self.entry
+            if entry.sectionHeader then searchBox:ClearFocus() end
+            SelectResult(entry)
+            if (entry.sectionHeader or not entry.kind) and not InCombatLockdown() and not GetCurrentKeyBoardFocus() then
+                EnableResultKeyboard()
+            end
         end)
         rows[index] = row
     end
@@ -1329,28 +1647,9 @@ local function CreateWindow()
     resizeHandle:SetScript("OnDragStart", StartResizingWindow)
     resizeHandle:SetScript("OnDragStop", StopResizingWindow)
 
-    scrollbar = CreateFrame("Slider", nil, frame)
-    scrollbar:SetOrientation("VERTICAL")
-    scrollbar:SetSize(SCROLLBAR_WIDTH, visibleRows * ROW_HEIGHT)
-    scrollbar:SetValueStep(1)
-    scrollbar:SetObeyStepOnDrag(true)
-    scrollbar:SetStepsPerPage(visibleRows)
-    scrollbar:EnableMouse(true)
-    scrollbar:EnableMouseWheel(true)
-    scrollbar:SetScript("OnMouseWheel", OnMouseWheel)
-    local track = scrollbar:CreateTexture(nil, "BACKGROUND")
-    track:SetPoint("TOP")
-    track:SetPoint("BOTTOM")
-    track:SetWidth(4)
-    track:SetColorTexture(unpack(COLORS.trim))
-    local thumb = scrollbar:CreateTexture(nil, "ARTWORK")
-    thumb:SetSize(7, 16)
-    thumb:SetColorTexture(unpack(COLORS.accent))
-    scrollbar:SetThumbTexture(thumb)
-    scrollbar:SetScript("OnValueChanged", function(_, value)
+    scrollbar = CreateListScrollbar(frame, OnMouseWheel, function(_, value)
         if not syncingScrollbar then ScrollTo(math.floor(value + 0.5)) end
     end)
-    scrollbar:Hide()
 
     frame:RegisterEvent("ITEM_DATA_LOAD_RESULT")
     frame:RegisterEvent("GET_ITEM_INFO_RECEIVED")
