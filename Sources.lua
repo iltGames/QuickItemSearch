@@ -245,18 +245,7 @@ local function MergeInstance(pair, journal, journalItems)
     return instance
 end
 
-function addon.SearchInstanceLoot(query)
-    if query == "" then
-        local name, instanceType = GetInstanceInfo()
-        if instanceType ~= "party" and instanceType ~= "raid" then
-            return {}, "Enter a dungeon name or use @dungeon inside an instance."
-        end
-        query = Clean(name) or ""
-    end
-    local key = DungeonKey(query):gsub("^kroldrok", "kroldok")
-    key = instanceAliases[key] or key
-    if #key < 2 then return {}, "Enter at least two characters of the dungeon name." end
-
+local function InstanceCatalog()
     local ok, _, _, _, atlasInstancesByName = pcall(AtlasIndex)
     local journal = _G.ForeverDungeonJournal_NS
     local instances = {}
@@ -271,20 +260,55 @@ function addon.SearchInstanceLoot(query)
             instances[instanceKey] = pair
         end
     end
-    if not next(instances) then return {}, "Dungeon data is unavailable from AtlasLoot or Forever Dungeon Journal." end
+    return instances, journal
+end
+
+local function MatchInstances(instances, key)
+    if instances[key] then return { instances[key] } end
+    local direMaulAlias = key == "dm"
     local matches = {}
-    if instances[key] then
-        matches[1] = instances[key]
-    else
-        for instanceKey, instance in pairs(instances) do
-            if (key ~= "dm" and instanceKey:find(key, 1, true)) or (key == "dm"
-                and (instanceKey:find("deadmines", 1, true) or instanceKey:find("diremaul", 1, true))) then
-                matches[#matches + 1] = instance
-            end
+    for instanceKey, instance in pairs(instances) do
+        if (not direMaulAlias and instanceKey:find(key, 1, true)) or (direMaulAlias
+            and (instanceKey:find("deadmines", 1, true) or instanceKey:find("diremaul", 1, true))) then
+            matches[#matches + 1] = instance
         end
     end
-    if #matches == 0 then return {}, "No matching dungeons or raids." end
     table.sort(matches, function(left, right) return left.name < right.name end)
+    return matches
+end
+
+local function InstanceQueryKey(query)
+    local key = DungeonKey(query):gsub("^kroldrok", "kroldok")
+    return instanceAliases[key] or key
+end
+
+function addon.FindDungeons(query)
+    local key = InstanceQueryKey(query)
+    if #key < 2 then return {} end
+    local instances = InstanceCatalog()
+    local rows = {}
+    for _, instance in ipairs(MatchInstances(instances, key)) do
+        local level = instance.journal and LevelText(instance.journal.level) or (instance.atlas and instance.atlas.level)
+        rows[#rows + 1] = { kind = "dungeon", name = instance.name, matchLabel = level and ("Levels " .. level) }
+    end
+    return rows
+end
+
+function addon.SearchInstanceLoot(query)
+    if query == "" then
+        local name, instanceType = GetInstanceInfo()
+        if instanceType ~= "party" and instanceType ~= "raid" then
+            return {}, "Enter a dungeon name or use @dungeon inside an instance."
+        end
+        query = Clean(name) or ""
+    end
+    local key = InstanceQueryKey(query)
+    if #key < 2 then return {}, "Enter at least two characters of the dungeon name." end
+
+    local instances, journal = InstanceCatalog()
+    if not next(instances) then return {}, "Dungeon data is unavailable from AtlasLoot or Forever Dungeon Journal." end
+    local matches = MatchInstances(instances, key)
+    if #matches == 0 then return {}, "No matching dungeons or raids." end
     local journalItems = {}
     for index, pair in ipairs(matches) do matches[index] = MergeInstance(pair, journal, journalItems) end
     local label = #matches == 1 and matches[1].name:gsub("|", "||") or ("%d matching instances"):format(#matches)
@@ -558,6 +582,90 @@ function addon.GetQuestRewardFilter(query)
     end
 end
 
+local indexedQuestDB, questRequirements
+
+local function StartQuestRequirementIndex()
+    local db = _G.LibQuestieDB
+    local questDB = db and db.Quest
+    if not questDB or questDB == indexedQuestDB or not questDB.GetAllIds or not questDB.Get
+        or not C_Timer or not C_Timer.After then return end
+
+    indexedQuestDB, questRequirements = questDB, nil
+    local ids, nextIndex
+    local requirements = {}
+
+    local function AddRequirement(itemID, questID)
+        if type(itemID) ~= "number" or itemID <= 0 then return end
+        local quests = requirements[itemID]
+        if not quests then
+            quests = {}
+            requirements[itemID] = quests
+        end
+        if quests[#quests] ~= questID then quests[#quests + 1] = questID end
+    end
+
+    local function Step()
+        if indexedQuestDB ~= questDB then return end
+        if not ids then
+            ids, nextIndex = questDB.GetAllIds(), 1
+            if type(ids) ~= "table" then return end
+        end
+        local lastIndex = math.min(nextIndex + 99, #ids)
+        for i = nextIndex, lastIndex do
+            local questID = ids[i]
+            local objectives = questDB.Get(questID, "objectives")
+            -- QuestieDB stores item objectives in the third objective group.
+            for _, objective in ipairs(objectives and objectives[3] or {}) do
+                AddRequirement(objective[1], questID)
+            end
+            for _, objective in ipairs(objectives and objectives[6] or {}) do
+                AddRequirement(objective[3], questID)
+            end
+            for _, itemID in ipairs(questDB.Get(questID, "requiredSourceItems") or {}) do
+                AddRequirement(itemID, questID)
+            end
+        end
+        if lastIndex < #ids then
+            nextIndex = lastIndex + 1
+            C_Timer.After(0, Step)
+        else
+            questRequirements = requirements
+        end
+    end
+
+    C_Timer.After(0, Step)
+end
+
+StartQuestRequirementIndex()
+
+function addon.GetItemQuestRequirements(itemID)
+    StartQuestRequirementIndex()
+    local db = _G.LibQuestieDB
+    local quests = {}
+    if not db or db.Quest ~= indexedQuestDB or not questRequirements then return quests end
+
+    for _, questID in ipairs(questRequirements[itemID] or {}) do
+        local name = Clean(db.Quest.Get(questID, "name"))
+        if name and name ~= "" then
+            quests[#quests + 1] = { id = questID, name = name }
+        end
+    end
+    return quests
+end
+
+local function AppendQuestRequirements(tooltip, itemID)
+    local quests = addon.GetItemQuestRequirements(itemID)
+    if #quests == 0 then return false end
+    tooltip:AddLine(" ")
+    for i = 1, math.min(6, #quests) do
+        tooltip:AddLine("Required for quest: " .. (quests[i].name:gsub("|", "||")), 1, 0.82, 0, true)
+    end
+    if #quests > 6 then
+        tooltip:AddLine("Additional quest requirements omitted.", 0.71, 0.66, 0.57, true)
+    end
+    return true
+end
+
 local LABELS = { drop = "Drops from", object = "Found in", container = "Found in", vendor = "Sold by", quest = "Quest reward" }
 
 local function AtlasLineAlreadyShown(tooltip, source)
@@ -581,7 +689,7 @@ function addon.AppendItemSources(tooltip, itemID)
         if not AtlasLineAlreadyShown(tooltip, source) then
             if added == 6 then
                 tooltip:AddLine("Additional sources omitted.", 0.71, 0.66, 0.57, true)
-                return
+                break
             end
             if added == 0 then
                 tooltip:AddLine(" ")
@@ -594,4 +702,5 @@ function addon.AppendItemSources(tooltip, itemID)
             added = added + 1
         end
     end
+    return AppendQuestRequirements(tooltip, itemID)
 end

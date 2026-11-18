@@ -14,6 +14,7 @@ local ARROW_REPEAT_MIN = 0.045
 local ARROW_REPEAT_ACCELERATION = 0.84
 local ARROW_DIRECTION = { UP = -1, DOWN = 1 }
 local HISTORY_LIMIT = 10
+local QUEST_MENU_PAGE_SIZE = 8
 local MAX_QUERY_BYTES = 512
 local queryExamples = {
     "@me shield upgrade no sp",
@@ -128,6 +129,10 @@ local function UpdateRow(row)
             or "Interface\\Icons\\INV_Scroll_03"
     elseif entry.kind == "emote" then
         icon = "Interface\\ChatFrame\\UI-ChatIcon-Chat-Up"
+    elseif entry.kind == "quest" then
+        icon = "Interface\\GossipFrame\\AvailableQuestIcon"
+    elseif entry.kind == "dungeon" then
+        icon = "Interface\\Icons\\INV_Misc_Map_01"
     elseif entry.kind == "spell" then
         icon = C_Spell.GetSpellTexture(entry.id)
         if not entry.matchLabel then
@@ -200,6 +205,7 @@ local function RenderResults()
             row:Hide()
         end
     end
+    if queryPopup.questItem and queryPopup.anchor.entry ~= queryPopup.questItem then queryPopup:Hide() end
 
     local visible = math.min(visibleRows, math.max(0, #results - firstVisible + 1))
     ResizePanel()
@@ -227,10 +233,14 @@ local function ShowHover(row)
     local entry = row.entry
     if not entry or entry.sectionHeader or entry.toggleSection then return end
     GameTooltip:SetOwner(row, "ANCHOR_RIGHT")
-    if entry.kind == "text" or entry.kind == "emote" then
+    if entry.kind == "text" or entry.kind == "emote" or entry.kind == "quest" or entry.kind == "dungeon" then
         GameTooltip:AddLine((entry.name:gsub("|", "||")), 1, 1, 1, true)
         if entry.kind == "emote" then
             GameTooltip:AddLine("Click to perform this emote.", 0.8, 0.8, 0.8)
+        elseif entry.kind == "quest" then
+            GameTooltip:AddLine("Click to view quest details.", 0.8, 0.8, 0.8)
+        elseif entry.kind == "dungeon" then
+            GameTooltip:AddLine("Click to view dungeon loot.", 0.8, 0.8, 0.8)
         elseif entry.tameSources then
             GameTooltip:AddLine(("Requires pet level %d to train."):format(entry.petTrainingLevel), 0.8, 0.8, 0.8)
             local instructions = #entry.tameSources > 0 and "Tame one of these beasts and have it use the ability."
@@ -265,8 +275,9 @@ local function ShowHover(row)
         GameTooltip:AddLine((label:gsub("|", "||")))
         GameTooltip:AddLine("Click to request item details.", 0.8, 0.8, 0.8, true)
     end
-    addon.AppendItemSources(GameTooltip, entry.id)
+    local hasQuest = addon.AppendItemSources(GameTooltip, entry.id)
     AppendCraftingSkills(GameTooltip, entry.id)
+    if hasQuest then GameTooltip:AddLine("Right-click to open a quest.", 0.8, 0.8, 0.8, true) end
     GameTooltip:Show()
 end
 
@@ -379,10 +390,30 @@ local function ShowResults(matches, hint, answerText, sections)
     selected, firstVisible = 1, 1
     resultSections, expandedSections = sections, {}
     if sections then selected = 2 end
-    local summaryText = hint or (#primaryResults == 0 and "No items found." or "")
+    local summaryText = hint or (#primaryResults == 0 and "No results found." or "")
     summary:SetText(summaryText)
     summary:SetShown(summaryText ~= "")
     message:Hide()
+    RenderSearchSections()
+end
+
+local function UpdateQuestDetails(matches, hint)
+    local changed = #matches ~= #primaryResults or hint ~= summary:GetText()
+    if not changed then
+        for i, entry in ipairs(matches) do
+            local previous = primaryResults[i]
+            if entry.name ~= previous.name or entry.matchLabel ~= previous.matchLabel or entry.id ~= previous.id then
+                changed = true
+                break
+            end
+        end
+    end
+    if not changed then return end
+    HideHover()
+    primaryResults = matches
+    selected = math.max(1, math.min(selected, #matches))
+    summary:SetText(hint)
+    summary:SetShown(hint ~= nil and hint ~= "")
     RenderSearchSections()
 end
 
@@ -404,6 +435,10 @@ local function SearchNow()
     if loadStats then
         cancelStatSearch = loadStats(function(loadedMatches, loadedHint, _, loadedAnswer, loadedSections)
             cancelStatSearch = nil
+            if addon.IsQuestDetailQuery and addon.IsQuestDetailQuery(query) then
+                UpdateQuestDetails(loadedMatches, loadedHint)
+                return
+            end
             ShowResults(loadedMatches, loadedHint, loadedAnswer, loadedSections)
         end)
     end
@@ -447,6 +482,12 @@ local function SelectResult(entry)
     end
     if entry.kind == "text" then return end
     RememberQuery(searchBox:GetText())
+    if entry.kind == "quest" or entry.kind == "dungeon" then
+        searchBox:SetText(entry.kind == "quest" and ("@quest " .. id) or ("@dungeon " .. entry.name))
+        SearchNow()
+        searchBox:SetFocus()
+        return
+    end
     if entry.kind == "emote" then
         SetActionMessage(addon.PerformSearchEmote(entry) and "" or "Emotes are unavailable in this client.")
         return
@@ -494,7 +535,7 @@ end
 local function OnItemData(_, event, id, success)
     if not frame:IsShown() then return end
     for _, row in ipairs(rows) do
-        if row.entry and row.entry.id == id and row.entry.kind ~= "spell" and row.entry.kind ~= "text" then
+        if row.entry and row.entry.id == id and not row.entry.kind then
             if success then
                 UpdateRow(row)
                 QueueHoverRefresh(row, id)
@@ -685,16 +726,16 @@ local function CreateQueryPopup()
     queryPopup:SetBackdrop(frame:GetBackdrop())
     queryPopup:SetBackdropColor(unpack(COLORS.panel))
     queryPopup:SetBackdropBorderColor(unpack(COLORS.border))
+    queryPopup:SetScript("OnHide", function(self) self.questItem = nil end)
     queryPopup:Hide()
 
     local empty = queryPopup:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     empty:SetPoint("TOPLEFT", 12, -13)
     empty:SetText("No recent searches")
 
-    local historySummary = queryPopup:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    historySummary:SetPoint("TOPLEFT", 12, -10)
-    historySummary:SetText("Only showing the last " .. HISTORY_LIMIT .. " searches")
-    historySummary:Hide()
+    local popupSummary = queryPopup:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    popupSummary:SetPoint("TOPLEFT", 12, -10)
+    popupSummary:Hide()
 
     local shortcutsTop = 26
     local filtersTop = shortcutsTop + fieldHeight + fieldGap
@@ -748,7 +789,7 @@ local function CreateQueryPopup()
 
     local buttons = {}
     queryPopup.buttons = buttons
-    for index = 1, math.max(HISTORY_LIMIT, #queryExamples) do
+    for index = 1, math.max(HISTORY_LIMIT, #queryExamples, QUEST_MENU_PAGE_SIZE + 2) do
         local button = CreateFrame("Button", nil, queryPopup)
         button:SetHeight(rowHeight)
         local highlight = button:CreateTexture(nil, "HIGHLIGHT")
@@ -760,7 +801,12 @@ local function CreateQueryPopup()
         button.label:SetJustifyH("LEFT")
         button.label:SetWordWrap(false)
         button:SetScript("OnClick", function(self)
+            if self.changePage then
+                self.changePage()
+                return
+            end
             local query = self.query
+            if queryPopup.questItem then RememberQuery(searchBox:GetText()) end
             queryPopup:Hide()
             RememberQuery(query)
             searchBox:SetText(query)
@@ -771,6 +817,69 @@ local function CreateQueryPopup()
         buttons[index] = button
     end
 
+    local function ShowChoices(owner, choices, questMenu, pageStart)
+        if not pageStart and queryPopup:IsShown() and queryPopup.anchor == owner then
+            queryPopup:Hide()
+            return
+        end
+        HideHover()
+        local displayed = choices
+        local heading = "Only showing the last " .. HISTORY_LIMIT .. " searches"
+        if questMenu then
+            heading = "Open quest"
+            local first = pageStart or 1
+            local last = math.min(#choices, first + QUEST_MENU_PAGE_SIZE - 1)
+            displayed = {}
+            if first > 1 then
+                displayed[#displayed + 1] = { name = "Previous quests", page = first - QUEST_MENU_PAGE_SIZE }
+            end
+            for i = first, last do displayed[#displayed + 1] = choices[i] end
+            if last < #choices then displayed[#displayed + 1] = { name = "Next quests", page = last + 1 } end
+            if #choices > QUEST_MENU_PAGE_SIZE then
+                heading = ("%s · %d–%d of %d"):format(heading, first, last, #choices)
+            end
+        end
+        local showFields = choices == queryExamples
+        fields:SetShown(showFields)
+        popupSummary:SetText(heading)
+        popupSummary:SetShown(not showFields)
+        local fieldsOffset = showFields and fieldsHeight or 22
+        queryPopup.selected = 0
+        queryPopup.count = #displayed
+        for index, row in ipairs(buttons) do
+            row:UnlockHighlight()
+            local choice = displayed[index]
+            local page = choice and questMenu and choice.page
+            row.changePage = page and function() ShowChoices(owner, choices, true, page) end or nil
+            row.query = nil
+            if choice then
+                local top = -5 - fieldsOffset - (index - 1) * rowHeight
+                row:ClearAllPoints()
+                row:SetPoint("TOPLEFT", 5, top)
+                row:SetPoint("TOPRIGHT", -5, top)
+                local display = questMenu and choice.name or (choice:match("|H.-|h(.-)|h") or choice)
+                row.label:SetText((display:gsub("|", "||")))
+                if not page then row.query = questMenu and ("@quest " .. choice.id) or choice end
+            end
+            row:SetShown(choice ~= nil)
+        end
+        empty:ClearAllPoints()
+        empty:SetPoint("TOPLEFT", 12, -13 - fieldsOffset)
+        empty:SetShown(#displayed == 0)
+        queryPopup:SetHeight(10 + fieldsOffset + math.max(1, #displayed) * rowHeight)
+        queryPopup.anchor = owner
+        queryPopup.questItem = questMenu and owner.entry or nil
+        queryPopup:ClearAllPoints()
+        if questMenu then
+            queryPopup:SetPoint("TOPLEFT", owner, "TOPRIGHT", 5, 0)
+        else
+            queryPopup:SetPoint("TOPRIGHT", owner, "BOTTOMRIGHT", 0, -5)
+        end
+        queryPopup:Show()
+        searchBox:SetFocus()
+    end
+    function queryPopup.ShowQuests(owner, quests) ShowChoices(owner, quests, true) end
+
     local function AddPopupButton(label, icon, right, queries)
         local button = CreateFrame("Button", nil, frame)
         button:SetSize(24, 24)
@@ -780,41 +889,7 @@ local function CreateQueryPopup()
         SetButtonTooltip(button, label)
         button:SetScript("OnClick", function(self)
             HideButtonTooltip(self)
-            if queryPopup:IsShown() and queryPopup.anchor == self then
-                queryPopup:Hide()
-                return
-            end
-            HideHover()
-            local showFields = queries == queryExamples
-            fields:SetShown(showFields)
-            historySummary:SetShown(not showFields)
-            local summaryHeight = showFields and 0 or 22
-            local fieldsOffset = showFields and fieldsHeight or summaryHeight
-            queryPopup.selected = 0
-            queryPopup.count = #queries
-            for index, row in ipairs(buttons) do
-                row:UnlockHighlight()
-                local query = queries[index]
-                row.query = query
-                if query then
-                    local top = -5 - fieldsOffset - (index - 1) * rowHeight
-                    row:ClearAllPoints()
-                    row:SetPoint("TOPLEFT", 5, top)
-                    row:SetPoint("TOPRIGHT", -5, top)
-                    local display = query:match("|H.-|h(.-)|h") or query
-                    row.label:SetText((display:gsub("|", "||")))
-                end
-                row:SetShown(query ~= nil)
-            end
-            empty:ClearAllPoints()
-            empty:SetPoint("TOPLEFT", 12, -13 - fieldsOffset)
-            empty:SetShown(#queries == 0)
-            queryPopup:SetHeight(10 + fieldsOffset + math.max(1, #queries) * rowHeight)
-            queryPopup.anchor = self
-            queryPopup:ClearAllPoints()
-            queryPopup:SetPoint("TOPRIGHT", self, "BOTTOMRIGHT", 0, -5)
-            queryPopup:Show()
-            searchBox:SetFocus()
+            ShowChoices(self, queries)
         end)
     end
 
@@ -903,7 +978,7 @@ local function CreateWindow()
     searchBox:SetAltArrowKeyMode(false)
     searchBox:SetAutoFocus(false)
     searchBox:SetMaxBytes(MAX_QUERY_BYTES)
-    searchBox.Instructions:SetText("Search items, gear, and more")
+    searchBox.Instructions:SetText("Search items, quests, and dungeons")
     searchBox.Instructions:SetTextColor(unpack(COLORS.mutedText))
     for _, key in ipairs({ "Left", "Middle", "Right" }) do
         local piece = searchBox[key]
@@ -966,6 +1041,7 @@ local function CreateWindow()
 
     for index = 1, MAX_ROWS do
         local row = CreateFrame("Button", nil, frame)
+        row:RegisterForClicks("LeftButtonUp", "RightButtonUp")
         row:SetHeight(ROW_HEIGHT)
         row:Hide()
         row.selection = row:CreateTexture(nil, "BACKGROUND")
@@ -999,15 +1075,22 @@ local function CreateWindow()
             if not self.entry then return end
             HideHover()
             hoveredRow = self
-            hoverAwaitingData = self.entry.id and self.entry.kind ~= "spell"
+            hoverAwaitingData = self.entry.id and not self.entry.kind
                 and not C_Item.IsItemDataCachedByID(self.entry.id)
             ShowHover(self)
         end)
         row:SetScript("OnLeave", function(self)
             if hoveredRow == self then HideHover() end
         end)
-        row:SetScript("OnClick", function(self)
+        row:SetScript("OnClick", function(self, button)
             if not self.entry or self.entry.sectionHeader then return end
+            if button == "RightButton" then
+                if not self.entry.kind then
+                    local quests = addon.GetItemQuestRequirements(self.entry.id)
+                    if #quests > 0 then queryPopup.ShowQuests(self, quests) else queryPopup:Hide() end
+                end
+                return
+            end
             ReleaseResultKeyboard()
             selected = self.resultIndex
             for _, visible in ipairs(rows) do
@@ -1096,12 +1179,20 @@ local function CreateWindow()
     frame:RegisterEvent("GET_ITEM_INFO_RECEIVED")
     frame:RegisterEvent("PLAYER_REGEN_DISABLED")
     frame:RegisterEvent("PLAYER_TARGET_CHANGED")
+    frame:RegisterEvent("QUEST_LOG_UPDATE")
     frame:SetScript("OnEvent", function(self, event, ...)
         if event == "PLAYER_REGEN_DISABLED" then
             ReleaseResultKeyboard()
         elseif event == "PLAYER_TARGET_CHANGED" then
             local query = searchBox:GetText():match("^%s*(.-)%s*$")
             if self:IsShown() and addon.GetSearchShortcut(query) == "@target" then SearchNow() end
+        elseif event == "QUEST_LOG_UPDATE" then
+            local query = searchBox:GetText()
+            if self:IsShown() and not debounce and not cancelStatSearch
+                and addon.IsQuestDetailQuery and addon.IsQuestDetailQuery(query) then
+                local matches, hint, load = addon.Search(query)
+                if not load then UpdateQuestDetails(matches, hint) end
+            end
         else
             OnItemData(self, event, ...)
         end

@@ -3,6 +3,7 @@ local _, addon = ...
 local searchShortcuts = {
     ["@target"] = "@target", ["@t"] = "@target",
     ["@me"] = "@me", ["@gear"] = "@me",
+    ["@quest"] = "@quest", ["@q"] = "@quest",
     ["@dungeon"] = "@dungeon", ["@instance"] = "@dungeon",
     ["@d"] = "@dungeon", ["@dung"] = "@dungeon", ["@inst"] = "@dungeon",
 }
@@ -155,7 +156,7 @@ local function ItemRows(items)
     return addon.AddItemGatheringDetails and addon.AddItemGatheringDetails(items) or items
 end
 
-local function SectionResults(query, items, exactCount, primary, title, hint, answer, itemsFirst)
+local function SectionResults(query, items, exactCount, primary, title, hint, answer, itemsFirst, names)
     local sections, seen = {}, {}
     local function Add(sectionTitle, rows)
         if not seen[sectionTitle] and rows and #rows > 0 then
@@ -178,6 +179,10 @@ local function SectionResults(query, items, exactCount, primary, title, hint, an
         Add("Items", ItemRows(items))
     end
     if itemsFirst then Add(title, primary) end
+    if names then
+        Add("Quests", names.quests)
+        Add("Dungeons", names.dungeons)
+    end
     if query ~= "" and not tonumber(query) then
         Add("Gathering", gathering)
         if not seen.Spells and addon.SearchPlayerSpells then Add("Spells", addon.SearchPlayerSpells(query)) end
@@ -198,6 +203,20 @@ local function SectionResults(query, items, exactCount, primary, title, hint, an
     if first.title == "Items" and #sections == 0 then return first.rows, hint, nil, answer end
     sections.title = first.title
     return first.rows, hint, nil, answer, sections
+end
+
+local function SearchGeneral(query, items, exactCount)
+    local quests, loadQuests
+    if addon.FindQuestTitles then quests, loadQuests = addon.FindQuestTitles(query) end
+    local names = { quests = quests, dungeons = addon.FindDungeons and addon.FindDungeons(query) }
+    local rows, hint, _, answer, sections = SectionResults(query, items, exactCount, nil, nil, nil, nil, nil, names)
+    if not loadQuests then return rows, hint, nil, answer, sections end
+    return rows, #rows == 0 and "Searching quests…" or hint, function(done)
+        return loadQuests(function(found)
+            names.quests = found
+            done(SectionResults(query, items, exactCount, nil, nil, nil, nil, nil, names))
+        end)
+    end, answer, sections
 end
 
 local function GearResults(query, gear, hint, loadStats)
@@ -293,6 +312,7 @@ function addon.Search(input)
     local shortcut, shortcutQuery = lowerQuery:match("^(@?%a+)%s+(.*)$")
     shortcut = shortcut or lowerQuery
     local command = addon.GetSearchShortcut(shortcut)
+    if command == "@quest" and addon.SearchQuests then return addon.SearchQuests(shortcutQuery or "") end
     if command == "@target" and not shortcutQuery then return addon.SearchTargetLoot() end
     local petShortcut = shortcut:gsub("^@", "")
     if petShortcut == "petspell" or petShortcut == "petspells" then
@@ -334,7 +354,7 @@ function addon.Search(input)
         return SectionResults(bossQuery, items, count, loot or {}, "Boss Drops", hint)
     end
     if #query < 2 then
-        return {}, "Enter an item or boss name, item ID, or item link."
+        return {}, "Enter a name, item ID, or item link."
     end
     if query:match("^%d+$") or query:match("^item:") or query:find("|H", 1, true) then
         return {}, "Enter a valid item ID or item link."
@@ -349,5 +369,5 @@ function addon.Search(input)
     end
     local rows, hint, loadStats, answer, sections = SearchByAction(query, results, exactCount)
     if rows then return rows, hint, loadStats, answer, sections end
-    return SectionResults(subject, results, exactCount)
+    return SearchGeneral(subject, results, exactCount)
 end
