@@ -578,6 +578,7 @@ local types = {
     [20004] = { 4, 1 }, [20005] = { 4, 3 }, [20006] = { 4, 0 },
 }
 C_Item.GetItemInfoInstant = function(id)
+    if type(id) == "string" then id = tonumber(id:match("^item:(%d+)")) end
     return nil, nil, nil, nil, nil, unpack(types[id])
 end
 QuickItemSearchSettings = nil
@@ -670,6 +671,81 @@ matches("@me helm", 20011)
 matches("@me legs", 20013)
 matches("@me chest stam near 12", 20012, 20005, 20010, 20008, 20004)
 assert(matches("@me chest stam def", 20012).matchLabel == "+14 Stamina · +8 Defense")
+
+local equipped = {
+    [5] = "item:101:5",
+    [11] = "item:102:5",
+    [12] = "item:103:5",
+    [16] = "item:104:5",
+}
+GetInventoryItemLink = function(unit, slot)
+    assert(unit == "player")
+    return equipped[slot]
+end
+local itemLevels = {
+    ["item:101:5"] = 30, ["item:102:5"] = 25, ["item:103:5"] = 40, ["item:104:5"] = 30,
+    [20001] = 29, [20002] = 30, [20003] = 31, [20004] = 29, [20005] = 35, [20006] = 32,
+    [20007] = 29, [20008] = 30, [20009] = 33, [20010] = 30, [20011] = 99, [20012] = 40, [20013] = 99,
+}
+addon.gear[20003][6] = itemLevels[20003]
+itemLevels[20003] = nil
+C_Item.GetDetailedItemLevelInfo = function(item) return itemLevels[item] end
+matches("upgrade 2h", 20003)
+matches("rings upgrade", 20006)
+matches("upgrade helm")
+local allUpgrades = addon.Search("upgrade")
+local upgradeIDs = {}
+for _, row in ipairs(allUpgrades) do upgradeIDs[row.id] = true end
+assert(upgradeIDs[20003] and upgradeIDs[20005] and upgradeIDs[20006] and upgradeIDs[20009] and upgradeIDs[20012])
+assert(#allUpgrades == 5)
+matches("chest upgrade lvl20-20", 20005, 20009)
+assert(matches("@me chest stam upgrade", 20012, 20005).matchLabel:find("ilvl 40", 1, true))
+equipped[5] = "item:103:5"
+matches("@me chest upgrade")
+equipped[5] = "item:101:5"
+
+itemLevels[20005] = nil
+C_Item.RequestLoadItemDataByID = function(id)
+    assert(id == 20005)
+    itemLevels[id] = 35
+end
+local upgradeRows, _, loadUpgrades = addon.Search("@me chest stam upgrade")
+assert(#upgradeRows == 0 and loadUpgrades, "Upgrade search must retry an unknown item level")
+loadUpgrades(function(rows)
+    assert(#rows == 2 and rows[1].id == 20012 and rows[2].id == 20005)
+end)
+while queued do
+    local step = queued
+    queued = nil
+    step()
+end
+
+equipped[17] = "item:105:5"
+types[105], itemLevels["item:105:5"] = { 4, 6 }, 30
+learned[433] = 1
+local shields = {
+    { 20014, "Plain Shield", 45, 16 },
+    { 20015, "Caster Shield", 45, 48 },
+    { 20016, "Old Shield", 30, 16 },
+    { 20017, "Healer Shield", 45, 64 },
+}
+for _, shield in ipairs(shields) do
+    local id, name, itemLevel, stats = unpack(shield)
+    addon.index[id], addon.gear[id], types[id] = name, { 14, 20, stats, 3, 1, itemLevel }, { 4, 6 }
+end
+addon.sortedEntries = nil
+statValues[20014] = { ITEM_MOD_STAMINA_SHORT = 8 }
+statValues[20015] = { ITEM_MOD_STAMINA_SHORT = 8, ITEM_MOD_SPELL_POWER_SHORT = 5 }
+statValues[20017] = { ITEM_MOD_SPELL_HEALING_DONE_SHORT = 7 }
+local _, exclusionHint = matches("@me shield upgrade no sp", 20017, 20014)
+assert(exclusionHint:find("No Spell Power", 1, true))
+matches("@me no sp shield upgrade", 20017, 20014)
+matches("@me shield upgrade no healing power", 20014)
+matches("@me shield upgrade stam no spell power", 20014)
+matches("@me shield upgrade no sp no stamina", 20017)
+C_Item.IsItemDataCachedByID = function() return false end
+matches("@me shield upgrade no sp", 20017, 20014)
+
 C_SkillInfo = nil
 local _, playerHint = matches("my gear rings")
 assert(playerHint == "Character proficiencies are unavailable.")

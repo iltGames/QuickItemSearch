@@ -4,7 +4,7 @@ Press Ctrl+Shift+Space to open search when the chord is free. To change it, open
 
 Use `/qis` to open search or `/qis linen cloth` to open it with a query. `/itemsearch` is also available.
 
-Click the book icon beside the search box for **Examples**. Use **Target**, **Me**, or **Dungeon** to insert a shortcut, or add a level, boss, stat, or crafted filter. The pocket-watch icon opens **History**, which keeps your 10 most recent searches that you ran from a menu or slash command, confirmed with Enter, opened a result for, or left in the box when closing the window. Click a query in either menu to run it.
+Click the book icon beside the search box for **Examples**. Use **Target**, **Me**, or **Dungeon** to insert a shortcut, or add a level, boss, stat, crafted, or upgrade filter. The pocket-watch icon opens **History**, which keeps your 10 most recent searches that you ran from a menu or slash command, confirmed with Enter, opened a result for, or left in the box when closing the window. Click a query in either menu to run it.
 
 Search by English item name, numeric ID, or pasted item link. Use Up and Down to browse results, scroll one row at a time with the mouse wheel, or drag the scrollbar on longer lists. Press Enter to activate an arrow-selected result or leave the search field after typing. Out of combat, you can keep using the arrows and Enter after activating a result. Hover for a tooltip, click to inspect, Shift-click to insert a link into open chat, or Ctrl-click to try on supported equipment. Escape closes the search overlay. Drag the bottom-right corner to resize the overlay. The window width and maximum number of visible rows are saved between sessions.
 
@@ -63,6 +63,10 @@ Use `wep`, `weps`, `weapon`, or `weapons` for both one-handed and two-handed mel
 Try `@me`, `@gear`, or `my gear` to find gear around your character's current level. The search uses your configured level offsets and learned armor and weapon proficiencies. Results are grouped by equipment slot, with plate, mail, leather, then cloth within each slot. Type a slot to show only that section, such as `@me helm`, `@me chest`, or `@me legs`. Check item tooltips for individual requirements such as class, faction, or reputation.
 
 Use the same search box to combine equipment slots, character levels, and item stats. Space-separated stats must all be present. Add `near` or `around` after a stat to filter its amount. When you specify several amounts, results are ranked by the sum of their differences from those amounts, within each armor type for character gear.
+
+Put `no` before a stat or its abbreviation to exclude gear with that indexed stat. Both `@me shield upgrade no sp` and `@me no sp shield upgrade` find shield upgrades without Spell Power. Repeat `no` for each stat you want to exclude, as in `shield no sp no intellect`.
+
+Add `upgrade` or click **Upgrade** in **Examples** to compare gear's base item level with the actual item level of the equipped piece it could replace. For rings, trinkets, and one-handed weapons you can replace in either hand, the comparison uses the lower equipped item level. A slot needs an equipped item to compare against. Try `@me chest upgrade` or `rings upgrade lvl 40`. Results show the item's level and the increase.
 
 | Query | Matches |
 | --- | --- |
