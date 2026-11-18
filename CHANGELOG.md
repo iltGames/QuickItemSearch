@@ -1,3 +1,8 @@
+## Quick Item Search 0.4.10
+
+- Restore gathering locations that Questie hides from its map display. Iron Deposit searches show the other indexed zones alongside Arathi Highlands.
+- Click back into the search window to resume arrow-key navigation from the selected result or highlighted action.
+
 ## Quick Item Search 0.4.9
 
 - Open a result's actions with right-click, Enter, or Right Arrow. Long menus scroll by wheel, scrollbar, or arrow keys. Left Arrow returns to the results, and clicking items or section headers moves the selection to that row.

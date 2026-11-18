@@ -517,8 +517,12 @@ local function ValidArea(id)
     return type(id) == "number" and id > 0
 end
 
-local function GetEntityAreas(entity, id)
+local function GetEntityAreas(entity, id, allowRawSpawns)
     local spawns = entity.Get(id, "spawns") or {}
+    if allowRawSpawns and not next(spawns) and entity.GetRaw then
+        -- Questie clears gathering spawns in its display policy.
+        spawns = entity.GetRaw(id, "spawns") or spawns
+    end
     local areas, seenAreas = {}, {}
     local function AddArea(area)
         if ValidArea(area) and not seenAreas[area] then
@@ -536,8 +540,8 @@ local function GetEntityAreas(entity, id)
     return areas, spawns
 end
 
-function addon.GetEntityLocations(entity, id)
-    local areas, spawns = GetEntityAreas(entity, id)
+function addon.GetEntityLocations(entity, id, allowRawSpawns)
+    local areas, spawns = GetEntityAreas(entity, id, allowRawSpawns)
     local rows = {}
     for _, area in ipairs(areas) do
         local seen = {}
@@ -665,7 +669,7 @@ function addon.GetGatheringLocations(itemID, nodes)
         if node then
             local locations = areasByNode[node] or {}
             areasByNode[node] = locations
-            for _, location in ipairs(addon.GetEntityLocations(db.Object, objectID)) do
+            for _, location in ipairs(addon.GetEntityLocations(db.Object, objectID, true)) do
                 locations[#locations + 1] = location
             end
         end

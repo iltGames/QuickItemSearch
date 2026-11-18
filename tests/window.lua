@@ -18,6 +18,10 @@ function methods:SetScript(name, callback)
     end
 end
 function methods:EnableKeyboard(enabled) self.keyboardEnabled = enabled end
+function methods:RegisterEvent(event)
+    self.events = self.events or {}
+    self.events[event] = true
+end
 function methods:SetPropagateKeyboardInput(propagate) self.propagateKeyboard = propagate end
 function methods:SetFocus() self.focused = true end
 function methods:ClearFocus() self.focused = false end
@@ -337,6 +341,10 @@ LibQuestieDB = nil
 toggle("@spell bite 3")
 
 local window = QuickItemSearchFrame
+local function ClickWindowArea(target)
+    GetMouseFoci = function() return { target } end
+    if window.events.GLOBAL_MOUSE_DOWN then window.scripts.OnEvent(window, "GLOBAL_MOUSE_DOWN", "LeftButton") end
+end
 local function PressWindowKey(key)
     assert(window:IsShown() and not GetCurrentKeyBoardFocus())
     if not window.keyboardEnabled then return true end
@@ -401,6 +409,13 @@ assert(not PressWindowKey("UP"), "result navigation must consume the Up key")
 assert(not PressWindowKey("ENTER"), "result navigation must consume Enter")
 window.scripts.OnKeyUp(window, "ENTER")
 assert(lastEmote == "Wave", "keyboard navigation must be able to activate another result")
+ClickWindowArea(UIParent)
+assert(PressWindowKey("DOWN"), "Clicking away should release arrow keys to the game")
+ClickWindowArea(window)
+assert(not PressWindowKey("DOWN"), "Clicking back should restore arrow navigation")
+assert(not PressWindowKey("ENTER"))
+window.scripts.OnKeyUp(window, "ENTER")
+assert(lastEmote == "Bow", "Arrow navigation should resume from the previous result")
 assert(PressWindowKey("W") and not window.keyboardEnabled,
     "movement must pass through and end result navigation")
 
@@ -515,6 +530,10 @@ for _ = 1, 3 do
 end
 assert(not PressWindowKey("RIGHT"), "Right should reopen the selected result's context menu")
 assert(IsPopupQueryHighlighted("@quest 86"), "Right should highlight the top choice on opening the menu")
+ClickWindowArea(UIParent)
+assert(PressWindowKey("DOWN"), "Clicking away should release keyboard navigation in the context menu")
+ClickWindowArea(window)
+assert(IsPopupQueryHighlighted("@quest 86"), "Refocusing should preserve the open context and its selection")
 assert(not PressWindowKey("DOWN"), "Down should navigate the open context menu")
 assert(not PressWindowKey("ENTER"))
 window.scripts.OnKeyUp(window, "ENTER")

@@ -690,7 +690,8 @@ local function ScrollTo(first)
     local lastStart = math.max(1, #results - visibleRows + 1)
     local nextStart = math.max(1, math.min(lastStart, first))
     if nextStart == firstVisible then return end
-    ReleaseResultKeyboard()
+    StopArrowRepeat()
+    pressedResultEnter = nil
     firstVisible = nextStart
     selected = math.max(firstVisible, math.min(selected, firstVisible + visibleRows - 1))
     RefreshNavigation()
@@ -1234,7 +1235,23 @@ EnableResultKeyboard = function()
     frame:SetScript("OnKeyDown", OnResultKeyDown)
     frame:SetScript("OnKeyUp", OnResultKeyUp)
     frame:EnableKeyboard(true)
-    keyboardHint:SetText(RESULT_KEYS)
+    keyboardHint:SetText(queryPopup.resultEntry and MENU_KEYS or RESULT_KEYS)
+end
+
+local function OnSearchMouseDown()
+    if not frame:IsShown() or InCombatLockdown() then return end
+    local target = GetMouseFoci()[1]
+    while target and target ~= frame and target ~= compactOptions do
+        if target == searchBox or (target == queryPopup and not queryPopup.resultEntry) then return end
+        target = target:GetParent()
+    end
+    if GetCurrentKeyBoardFocus() == searchBox then searchBox:ClearFocus() end
+    if target ~= frame then
+        ReleaseResultKeyboard()
+    elseif not GetCurrentKeyBoardFocus() then
+        if debounce then SearchNow() end
+        if #results > 0 then EnableResultKeyboard() end
+    end
 end
 
 local function RefreshSearchPreferences()
@@ -1581,6 +1598,7 @@ local function CreateWindow()
                 end
                 return
             end
+            local resumeKeyboard = resultKeyboardActive
             ReleaseResultKeyboard()
             selected = self.resultIndex
             for _, visible in ipairs(rows) do
@@ -1589,7 +1607,8 @@ local function CreateWindow()
             local entry = self.entry
             if entry.sectionHeader then searchBox:ClearFocus() end
             SelectResult(entry)
-            if (entry.sectionHeader or not entry.kind) and not InCombatLockdown() and not GetCurrentKeyBoardFocus() then
+            if (resumeKeyboard or entry.sectionHeader or not entry.kind)
+                and not InCombatLockdown() and not GetCurrentKeyBoardFocus() then
                 EnableResultKeyboard()
             end
         end)
@@ -1652,6 +1671,7 @@ local function CreateWindow()
     end)
 
     frame:RegisterEvent("ITEM_DATA_LOAD_RESULT")
+    frame:RegisterEvent("GLOBAL_MOUSE_DOWN")
     frame:RegisterEvent("GET_ITEM_INFO_RECEIVED")
     frame:RegisterEvent("PLAYER_REGEN_DISABLED")
     frame:RegisterEvent("PLAYER_TARGET_CHANGED")
@@ -1659,6 +1679,8 @@ local function CreateWindow()
     frame:SetScript("OnEvent", function(self, event, ...)
         if event == "PLAYER_REGEN_DISABLED" then
             ReleaseResultKeyboard()
+        elseif event == "GLOBAL_MOUSE_DOWN" then
+            OnSearchMouseDown()
         elseif event == "PLAYER_TARGET_CHANGED" then
             local query = searchBox:GetText():match("^%s*(.-)%s*$")
             if self:IsShown() and addon.GetSearchShortcut(query) == "@target" then SearchNow() end

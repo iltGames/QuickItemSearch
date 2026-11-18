@@ -143,6 +143,33 @@ do
     assert(choices[2].query == "@gather 3820" and choices[2].name == "Show gathering requirements")
     LibQuestieDB = previous
 end
+do
+    local previous = LibQuestieDB
+    addon.index[2772] = "Iron Ore"
+    LibQuestieDB = {
+        Item = { Get = function(id, field)
+            if id == 2772 and field == "objectDrops" then return { 1735 } end
+        end },
+        Object = {
+            Get = function(id, field)
+                if id ~= 1735 then return end
+                if field == "name" then return "Iron Deposit" end
+                if field == "zoneID" then return 45 end
+                if field == "spawns" then return {} end
+            end,
+            GetRaw = function(id, field)
+                if id == 1735 and field == "spawns" then
+                    return { [3] = { { 10.86, 55.32 } }, [45] = { { 62.93, 70.9 } } }
+                end
+            end,
+        },
+    }
+    local rows = addon.Search("@gather 2772")
+    assert(#rows == 3 and rows[2].name == "Area 3" and rows[2].matchLabel == "10.9, 55.3",
+        "Iron Deposit should show its raw spawn zones when Questie clears gathering spawns")
+    addon.index[2772] = nil
+    LibQuestieDB = previous
+end
 matches("arcanite make transmute", 17187)
 matches("arcanite transmute make", 17187)
 matches("how do I make arcanite transmute?", 17187)
