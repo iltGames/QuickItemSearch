@@ -206,8 +206,10 @@ local function AddQuestChain(rows, quests, id, links, title, direction)
         first = first + 1
     end
     if #entries == 0 then return end
-    if title == "Previous quests" and #entries == 1 then title = "Previous quest" end
-    rows[#rows + 1] = { kind = "text", name = title, sectionHeader = true }
+    local name = title == "Previous quests" and #entries == 1 and "Previous quest" or title
+    rows[#rows + 1] = {
+        kind = "text", name = name, sectionHeader = true, collapsible = #entries, sectionKey = title,
+    }
     for _, entry in ipairs(entries) do rows[#rows + 1] = entry end
 end
 

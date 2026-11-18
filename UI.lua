@@ -62,6 +62,7 @@ local EnableResultKeyboard
 local rows, results = {}, {}
 local primaryResults, resultSections
 local expandedSections
+local collapsedDetailSections
 local selected = 1
 local firstVisible = 1
 local syncingScrollbar
@@ -73,6 +74,7 @@ local hoverAwaitingData
 local hoverRefresh
 local moving
 local compactOptions, refreshCompactOptions, refreshAddOnOptions
+local addOnSettingsCategory
 
 local function GetSettings()
     local settings = _G[settingsKey]
@@ -85,18 +87,6 @@ end
 
 local function QuestRewardLinksEnabled()
     return GetSettings().questRewardLinks ~= false
-end
-
-local function ResultContextMenusEnabled()
-    return GetSettings().resultContextMenus ~= false
-end
-
-local function MapPinActionsEnabled()
-    return GetSettings().mapPinActions ~= false
-end
-
-local function VendorZonesEnabled()
-    return GetSettings().vendorZones ~= false
 end
 
 local function GetHistoryLimit()
@@ -153,7 +143,7 @@ local function UpdateRow(row)
         detail = FormatSkillThresholds(entry.gatheringProfession, entry.gatheringThresholds)
     elseif entry.skillThresholds then
         detail = FormatSkillThresholds(entry.profession, entry.skillThresholds)
-    elseif entry.vendorZone and VendorZonesEnabled() then
+    elseif entry.vendorZone then
         detail = detail .. " · " .. entry.vendorZone:gsub("|", "||")
     elseif not entry.kind then
         local recipes = ItemRecipes(entry.id)
@@ -285,9 +275,8 @@ local function ShowHover(row)
         elseif entry.kind == "npc" or entry.kind == "object" then
             hint = "Click to view known locations."
         elseif entry.tameSources then
-            hint = ResultContextMenusEnabled() and "Right-click for training details." or "Click for training details."
-        elseif ResultContextMenusEnabled() and MapPinActionsEnabled()
-            and (entry.pinEntity or (entry.pinTargetName and entry.x)) and #addon.GetResultMapPins(entry) > 0 then
+            hint = "Right-click for training details."
+        elseif (entry.pinEntity or (entry.pinTargetName and entry.x)) and #addon.GetResultMapPins(entry) > 0 then
             hint = "Right-click to add a map pin."
         end
         local clippedDetail = row.idLabel:IsTruncated()
@@ -309,7 +298,7 @@ local function ShowHover(row)
             GameTooltip:AddLine((entry.name:gsub("|", "||")))
             GameTooltip:AddLine(("Spell %d"):format(entry.id), 0.8, 0.8, 0.8)
         end
-        if entry.unlockLevel and ResultContextMenusEnabled() then
+        if entry.unlockLevel then
             GameTooltip:AddLine("Right-click for training details.", 0.8, 0.8, 0.8, true)
         elseif addon.AppendSpellUnlockSources then
             addon.AppendSpellUnlockSources(GameTooltip, entry)
@@ -324,17 +313,14 @@ local function ShowHover(row)
         GameTooltip:AddLine("Click to request item details.", 0.8, 0.8, 0.8, true)
     end
     local sources = addon.GetItemSources(entry.id)
-    local hasRelated
-    if ResultContextMenusEnabled() then
-        local nodes = addon.GetGatheringNodes and addon.GetGatheringNodes(entry.id)
-        hasRelated = ItemRecipes(entry.id) or (nodes and #nodes > 0)
-            or (addon.HasRecipesUsingItem and addon.HasRecipesUsingItem(entry.id))
-        if not hasRelated then
-            for _, source in ipairs(sources) do
-                if source.kind ~= "quest" then
-                    hasRelated = true
-                    break
-                end
+    local nodes = addon.GetGatheringNodes and addon.GetGatheringNodes(entry.id)
+    local hasRelated = ItemRecipes(entry.id) or (nodes and #nodes > 0)
+        or (addon.HasRecipesUsingItem and addon.HasRecipesUsingItem(entry.id))
+    if not hasRelated then
+        for _, source in ipairs(sources) do
+            if source.kind ~= "quest" then
+                hasRelated = true
+                break
             end
         end
     end
@@ -410,17 +396,45 @@ end
 local function CanActivate(entry)
     if not entry then return false end
     if entry.kind ~= "text" or entry.toggleSection or entry.tameSources then return true end
-    if not ResultContextMenusEnabled() then return false end
-    return entry.relatedQuery or entry.trainerName
-        or (MapPinActionsEnabled() and (entry.pinEntity or (entry.pinTargetName and entry.x)))
+    return entry.relatedQuery or entry.trainerName or entry.pinEntity or (entry.pinTargetName and entry.x)
 end
 
-local function RenderSearchSections(collapsedTitle)
+local function IsSectionExpanded(entry)
+    if entry.sectionHeader then return not collapsedDetailSections[entry.toggleSection] end
+    return expandedSections[entry.toggleSection] == true
+end
+
+local function SelectedDetailHeader()
+    local entry = results[selected]
+    if entry and entry.sectionHeader and entry.toggleSection then return entry end
+end
+
+local function RenderSearchSections(selectedSection)
+    local function SelectSectionRow()
+        firstVisible = math.max(1, firstVisible + #results - selected)
+        selected = #results
+    end
+
+    local function AppendDetailHeader(title, key)
+        local header = { kind = "text", name = title, sectionHeader = true, toggleSection = key or title }
+        local expanded = IsSectionExpanded(header)
+        header.matchLabel = expanded and "Collapse" or "Expand"
+        results[#results + 1] = header
+        if selectedSection and selectedSection.sectionHeader and header.toggleSection == selectedSection.toggleSection then
+            SelectSectionRow()
+        end
+        return expanded
+    end
+
     results = primaryResults
     if resultSections then
         results = {}
-        local function AppendSection(title, entries)
-            results[#results + 1] = { kind = "text", name = title, sectionHeader = true }
+        local function AppendSection(title, entries, collapsible)
+            if collapsible then
+                if not AppendDetailHeader(title) then return end
+            else
+                results[#results + 1] = { kind = "text", name = title, sectionHeader = true }
+            end
             local previewCount = #resultSections > 0 and math.min(SECTION_PREVIEW_ROWS, #entries) or #entries
             local expanded = expandedSections[title]
             local visibleCount = expanded and #entries or previewCount
@@ -429,22 +443,38 @@ local function RenderSearchSections(collapsedTitle)
                 local label = title == "Items" and "items" or "results"
                 local text = expanded and ("Show fewer " .. label) or ("Show all %d %s"):format(#entries, label)
                 results[#results + 1] = { kind = "text", name = text, toggleSection = title }
-                if title == collapsedTitle then
-                    firstVisible = math.max(1, firstVisible + #results - selected)
-                    selected = #results
+                if selectedSection and not selectedSection.sectionHeader and title == selectedSection.toggleSection then
+                    SelectSectionRow()
                 end
             end
         end
-        AppendSection(resultSections.title, primaryResults)
+        AppendSection(resultSections.title, primaryResults, resultSections.collapsible)
         for _, section in ipairs(resultSections) do
-            AppendSection(section.title, section.rows)
+            AppendSection(section.title, section.rows, section.collapsible)
+        end
+    elseif addon.IsQuestDetailQuery and addon.IsQuestDetailQuery(searchBox:GetText()) then
+        results = {}
+        local index = 1
+        while index <= #primaryResults do
+            local entry = primaryResults[index]
+            if entry.collapsible then
+                if AppendDetailHeader(entry.name, entry.sectionKey) then
+                    for i = index + 1, index + entry.collapsible do results[#results + 1] = primaryResults[i] end
+                end
+                index = index + entry.collapsible
+            else
+                results[#results + 1] = entry
+            end
+            index = index + 1
         end
     end
+    selected = math.min(selected, math.max(1, #results))
     firstVisible = math.min(firstVisible, math.max(1, #results - visibleRows + 1))
     RenderResults()
 end
 
 local function ShowResults(matches, hint, answerText, sections, preserveKeyboard)
+    local selectedHeader = preserveKeyboard and SelectedDetailHeader()
     if preserveKeyboard and resultKeyboardActive then
         StopArrowRepeat()
         arrowSelected, pressedResultEnter = nil, nil
@@ -461,14 +491,16 @@ local function ShowResults(matches, hint, answerText, sections, preserveKeyboard
             primaryResults[#primaryResults + 1] = entry
         end
     end
-    selected, firstVisible = 1, 1
-    resultSections, expandedSections = sections, {}
-    if sections then selected = 2 end
+    if not selectedHeader then
+        selected, firstVisible = sections and not sections.collapsible and 2 or 1, 1
+    end
+    resultSections = sections
+    if not preserveKeyboard then expandedSections, collapsedDetailSections = {}, {} end
     local summaryText = hint or (#primaryResults == 0 and "No results found." or "")
     summary:SetText(summaryText)
     summary:SetShown(summaryText ~= "")
     message:Hide()
-    RenderSearchSections()
+    RenderSearchSections(selectedHeader)
 end
 
 local function UpdateQuestDetails(matches, hint)
@@ -485,10 +517,9 @@ local function UpdateQuestDetails(matches, hint)
     if not changed then return end
     HideHover()
     primaryResults = matches
-    selected = math.max(1, math.min(selected, #matches))
     summary:SetText(hint)
     summary:SetShown(hint ~= nil and hint ~= "")
-    RenderSearchSections()
+    RenderSearchSections(SelectedDetailHeader())
 end
 
 local function SearchNow()
@@ -542,15 +573,19 @@ local function SelectResult(entry)
     queryPopup:Hide()
     if entry.toggleSection then
         local title = entry.toggleSection
-        local wasExpanded = expandedSections[title]
-        expandedSections[title] = not wasExpanded
-        RenderSearchSections(wasExpanded and title or nil)
+        local wasExpanded = IsSectionExpanded(entry)
+        if entry.sectionHeader then
+            collapsedDetailSections[title] = wasExpanded or nil
+        else
+            expandedSections[title] = not wasExpanded or nil
+        end
+        RenderSearchSections(wasExpanded and entry or nil)
         return
     end
     if entry.kind == "text" then
         if entry.tameSources then
             local row = rows[selected - firstVisible + 1]
-            if row then queryPopup.ShowResultChoices(row, true) end
+            if row then queryPopup.ShowResultChoices(row) end
         end
         return
     end
@@ -646,7 +681,7 @@ end
 local function MoveSelection(delta)
     if #results == 0 then return end
     local nextSelection = math.max(1, math.min(#results, selected + delta))
-    while results[nextSelection] and results[nextSelection].sectionHeader do
+    while results[nextSelection] and results[nextSelection].sectionHeader and not results[nextSelection].toggleSection do
         nextSelection = nextSelection + delta
     end
     if not results[nextSelection] then return end
@@ -1094,28 +1129,25 @@ local function CreateQueryPopup()
         queryPopup.fromKeyboard = nil
     end
 
-    function queryPopup.ShowResultChoices(owner, primary)
+    function queryPopup.ShowResultChoices(owner)
         local entry = owner.entry
         if not entry or entry.sectionHeader or entry.toggleSection then return end
-        local enabled = ResultContextMenusEnabled()
-        local choices = (enabled or (primary and entry.tameSources)) and addon.GetResultRelatedQueries(entry) or {}
-        if enabled and MapPinActionsEnabled() then
-            local locations = addon.GetResultMapPins(entry)
-            local pinChoices = {}
-            for _, location in ipairs(locations) do
-                pinChoices[#pinChoices + 1] = {
-                    name = location.label,
-                    action = function()
-                        local placed = addon.AddResultMapPin(location)
-                        SetActionMessage(placed and ("Map pin added · " .. location.label) or "Unable to add a map pin.")
-                    end,
-                }
-            end
-            if #pinChoices == 1 then
-                table.insert(choices, 1, { name = "Add map pin", action = pinChoices[1].action })
-            elseif #pinChoices > 1 then
-                table.insert(choices, 1, { name = "Add map pin", submenu = pinChoices })
-            end
+        local choices = addon.GetResultRelatedQueries(entry)
+        local locations = addon.GetResultMapPins(entry)
+        local pinChoices = {}
+        for _, location in ipairs(locations) do
+            pinChoices[#pinChoices + 1] = {
+                name = location.label,
+                action = function()
+                    local placed = addon.AddResultMapPin(location)
+                    SetActionMessage(placed and ("Map pin added · " .. location.label) or "Unable to add a map pin.")
+                end,
+            }
+        end
+        if #pinChoices == 1 then
+            table.insert(choices, 1, { name = "Add map pin", action = pinChoices[1].action })
+        elseif #pinChoices > 1 then
+            table.insert(choices, 1, { name = "Add map pin", submenu = pinChoices })
         end
         local related = #choices > 0
         if not entry.kind then
@@ -1161,7 +1193,7 @@ local function UseResultArrow(key)
     local entry = results[selected]
     if entry and entry.toggleSection then
         local expand = key == "RIGHT"
-        if expand ~= (expandedSections[entry.toggleSection] == true) then
+        if expand ~= IsSectionExpanded(entry) then
             if GetCurrentKeyBoardFocus() == searchBox then
                 searchBox:ClearFocus()
                 EnableResultKeyboard()
@@ -1259,7 +1291,7 @@ local function RefreshSearchPreferences()
     if refreshAddOnOptions then refreshAddOnOptions() end
 end
 
-local function CreateSearchPreferences(panel, anchor, margin)
+local function CreateSearchPreferences(panel, anchor, margin, includeDetailOptions)
     local historyLabel = panel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
     historyLabel:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, -margin)
     historyLabel:SetText("Search history length")
@@ -1290,99 +1322,55 @@ local function CreateSearchPreferences(panel, anchor, margin)
     sectionsLabel:SetText("Automatic result sections")
 
     local checks = {}
-    for index, section in ipairs(addon.automaticSections) do
-        local check = CreateFrame("CheckButton", nil, panel, "UICheckButtonTemplate")
-        check:SetSize(24, 24)
-        local column, row = (index - 1) % 2, math.floor((index - 1) / 2)
-        check:SetPoint("TOPLEFT", sectionsLabel, "BOTTOMLEFT", column * 122, -4 - row * 24)
-        local label = check:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
-        label:SetPoint("LEFT", check, "RIGHT", 1, 0)
-        label:SetText(section)
-        check:SetHitRectInsets(0, -label:GetStringWidth() - 1, 0, 0)
-        check:SetScript("OnClick", function(self)
-            local settings = GetSettings()
-            if type(settings.hiddenSections) ~= "table" then settings.hiddenSections = {} end
-            settings.hiddenSections[section] = not self:GetChecked() or nil
-            RefreshSearchPreferences()
-            if frame and frame:IsShown() then SearchNow() end
-        end)
-        checks[section] = check
+    local function AddSectionCheckboxes(heading, sections)
+        for index, section in ipairs(sections) do
+            local check = CreateFrame("CheckButton", nil, panel, "UICheckButtonTemplate")
+            check:SetSize(24, 24)
+            local column, row = (index - 1) % 2, math.floor((index - 1) / 2)
+            check:SetPoint("TOPLEFT", heading, "BOTTOMLEFT", column * 122, -4 - row * 24)
+            local label = check:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+            label:SetPoint("LEFT", check, "RIGHT", 1, 0)
+            label:SetText(section)
+            check:SetHitRectInsets(0, -label:GetStringWidth() - 1, 0, 0)
+            check:SetScript("OnClick", function(self)
+                local settings = GetSettings()
+                if type(settings.hiddenSections) ~= "table" then settings.hiddenSections = {} end
+                settings.hiddenSections[section] = not self:GetChecked() or nil
+                RefreshSearchPreferences()
+                if frame and frame:IsShown() then SearchNow() end
+            end)
+            checks[section] = check
+        end
+        return -10 - math.ceil(#sections / 2) * 24
     end
+    local sectionBottom = AddSectionCheckboxes(sectionsLabel, addon.automaticSections)
 
-    local rewardLinks = CreateFrame("CheckButton", nil, panel, "UICheckButtonTemplate")
-    rewardLinks:SetSize(24, 24)
-    rewardLinks:SetPoint("TOPLEFT", sectionsLabel, "BOTTOMLEFT", 0, -10 - math.ceil(#addon.automaticSections / 2) * 24)
-    local rewardLabel = rewardLinks:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
-    rewardLabel:SetPoint("LEFT", rewardLinks, "RIGHT", 1, 0)
-    rewardLabel:SetText("Quest reward links")
-    rewardLinks:SetHitRectInsets(0, -rewardLabel:GetStringWidth() - 1, 0, 0)
-    rewardLinks:SetScript("OnClick", function(self)
-        GetSettings().questRewardLinks = not not self:GetChecked()
-        if queryPopup and queryPopup.resultEntry then queryPopup:Hide() end
-        RefreshSearchPreferences()
-    end)
+    local rewardLinks
+    if includeDetailOptions then
+        local detailsLabel = panel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+        detailsLabel:SetPoint("TOPLEFT", sectionsLabel, "BOTTOMLEFT", 0, sectionBottom)
+        detailsLabel:SetText("Detail view sections")
+        local detailsBottom = AddSectionCheckboxes(detailsLabel, { "Previous quests", "Next quests", "NPC Loot", "Vendor Items" })
 
-    local contextMenus = CreateFrame("CheckButton", nil, panel, "UICheckButtonTemplate")
-    contextMenus:SetSize(24, 24)
-    contextMenus:SetPoint("TOPLEFT", rewardLinks, "BOTTOMLEFT", 0, 0)
-    local contextLabel = contextMenus:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
-    contextLabel:SetPoint("LEFT", contextMenus, "RIGHT", 1, 0)
-    contextLabel:SetText("Result context menus")
-    contextMenus:SetHitRectInsets(0, -contextLabel:GetStringWidth() - 1, 0, 0)
-    contextMenus:SetScript("OnClick", function(self)
-        GetSettings().resultContextMenus = not not self:GetChecked()
-        if queryPopup and queryPopup.resultEntry then queryPopup:Hide() end
-        RefreshSearchPreferences()
-    end)
-
-    local mapPinActions = CreateFrame("CheckButton", nil, panel, "UICheckButtonTemplate")
-    mapPinActions:SetSize(24, 24)
-    mapPinActions:SetPoint("TOPLEFT", contextMenus, "BOTTOMLEFT", 0, 0)
-    local pinLabel = mapPinActions:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
-    pinLabel:SetPoint("LEFT", mapPinActions, "RIGHT", 1, 0)
-    pinLabel:SetText("Map pin actions")
-    mapPinActions:SetHitRectInsets(0, -pinLabel:GetStringWidth() - 1, 0, 0)
-    mapPinActions:SetScript("OnClick", function(self)
-        GetSettings().mapPinActions = not not self:GetChecked()
-        if queryPopup and queryPopup.resultEntry then queryPopup:Hide() end
-        RefreshSearchPreferences()
-    end)
-
-    local vendorZones = CreateFrame("CheckButton", nil, panel, "UICheckButtonTemplate")
-    vendorZones:SetSize(24, 24)
-    vendorZones:SetPoint("TOPLEFT", mapPinActions, "BOTTOMLEFT", 0, 0)
-    local vendorZoneLabel = vendorZones:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
-    vendorZoneLabel:SetPoint("LEFT", vendorZones, "RIGHT", 1, 0)
-    vendorZoneLabel:SetText("Vendor zones")
-    vendorZones:SetHitRectInsets(0, -vendorZoneLabel:GetStringWidth() - 1, 0, 0)
-    vendorZones:SetScript("OnClick", function(self)
-        GetSettings().vendorZones = not not self:GetChecked()
-        RefreshSearchPreferences()
-        if frame and frame:IsShown() then RenderResults() end
-    end)
-
-    local nearestVendors = CreateFrame("CheckButton", nil, panel, "UICheckButtonTemplate")
-    nearestVendors:SetSize(24, 24)
-    nearestVendors:SetPoint("TOPLEFT", vendorZones, "BOTTOMLEFT", 0, 0)
-    local nearestLabel = nearestVendors:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
-    nearestLabel:SetPoint("LEFT", nearestVendors, "RIGHT", 1, 0)
-    nearestLabel:SetText("Nearest vendors first")
-    nearestVendors:SetHitRectInsets(0, -nearestLabel:GetStringWidth() - 1, 0, 0)
-    nearestVendors:SetScript("OnClick", function(self)
-        GetSettings().nearestVendorsFirst = not not self:GetChecked()
-        RefreshSearchPreferences()
-        if frame and frame:IsShown() then SearchNow() end
-    end)
+        rewardLinks = CreateFrame("CheckButton", nil, panel, "UICheckButtonTemplate")
+        rewardLinks:SetSize(24, 24)
+        rewardLinks:SetPoint("TOPLEFT", detailsLabel, "BOTTOMLEFT", 0, detailsBottom)
+        local label = rewardLinks:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+        label:SetPoint("LEFT", rewardLinks, "RIGHT", 1, 0)
+        label:SetText("Quest reward links")
+        rewardLinks:SetHitRectInsets(0, -label:GetStringWidth() - 1, 0, 0)
+        rewardLinks:SetScript("OnClick", function(self)
+            GetSettings().questRewardLinks = not not self:GetChecked()
+            if queryPopup and queryPopup.resultEntry then queryPopup:Hide() end
+            RefreshSearchPreferences()
+        end)
+    end
 
     local function Refresh()
         local current = GetHistoryLimit()
         for limit, button in pairs(limitButtons) do button:SetEnabled(limit ~= current) end
         for section, check in pairs(checks) do check:SetChecked(addon.IsAutomaticSectionEnabled(section)) end
-        rewardLinks:SetChecked(QuestRewardLinksEnabled())
-        contextMenus:SetChecked(ResultContextMenusEnabled())
-        mapPinActions:SetChecked(MapPinActionsEnabled())
-        vendorZones:SetChecked(VendorZonesEnabled())
-        nearestVendors:SetChecked(addon.IsVendorProximityEnabled())
+        if rewardLinks then rewardLinks:SetChecked(QuestRewardLinksEnabled()) end
     end
     panel:HookScript("OnShow", Refresh)
     return Refresh
@@ -1391,7 +1379,7 @@ end
 local function CreateCompactOptions()
     local width = 272
     local panel = CreateFrame("Frame", "QuickItemSearchOptionsFrame", frame, "BackdropTemplate")
-    panel:SetSize(width, 250 + math.ceil(#addon.automaticSections / 2) * 24)
+    panel:SetSize(width, 128 + math.ceil(#addon.automaticSections / 2) * 24)
     panel:SetFrameStrata("DIALOG")
     panel:SetFrameLevel(frame:GetFrameLevel() + 5)
     panel:SetClampedToScreen(true)
@@ -1409,6 +1397,20 @@ local function CreateCompactOptions()
     close:SetPoint("TOPRIGHT", -5, -5)
     close:SetScript("OnClick", function() panel:Hide() end)
     refreshCompactOptions = CreateSearchPreferences(panel, title, 11)
+
+    if addOnSettingsCategory and Settings.OpenToCategory then
+        panel:SetHeight(panel:GetHeight() + 34)
+        local settingsButton = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+        settingsButton:SetSize(162, 24)
+        settingsButton:SetPoint("BOTTOMLEFT", 14, 12)
+        settingsButton:SetText("Open AddOn Settings")
+        settingsButton:SetScript("OnClick", function()
+            panel:Hide()
+            searchBox:ClearFocus()
+            ReleaseResultKeyboard()
+            Settings.OpenToCategory(addOnSettingsCategory:GetID())
+        end)
+    end
 
     local button = CreateFrame("Button", nil, frame)
     button:SetSize(16, 16)
@@ -1912,9 +1914,9 @@ local function CreateOptions()
         end
     end)
     local anchor = addon.GetLevelWindow and CreateLevelOptions(panel, status) or status
-    refreshAddOnOptions = CreateSearchPreferences(panel, anchor, 22)
-    local category = Settings.RegisterCanvasLayoutCategory(panel, title)
-    Settings.RegisterAddOnCategory(category)
+    refreshAddOnOptions = CreateSearchPreferences(panel, anchor, 22, true)
+    addOnSettingsCategory = Settings.RegisterCanvasLayoutCategory(panel, title)
+    Settings.RegisterAddOnCategory(addOnSettingsCategory)
 end
 
 CreateOptions()

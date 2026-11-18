@@ -4,27 +4,27 @@ Press Ctrl+Shift+Space to open search when the chord is free. To change it, open
 
 Use `/qis` to open search or `/qis linen cloth` to open it with a query. `/itemsearch` is also available.
 
-Click the book icon beside the search box for **Examples**. Use **Target**, **Me**, or **Dungeon** to insert a shortcut, or add a level, boss, stat, crafted, or upgrade filter. The pocket-watch icon opens **History**, which keeps your 10 most recent searches that you ran from a menu or slash command, confirmed with Enter, opened a result for, or left in the box when closing the window. Click a query in either menu to run it.
+Click the book icon beside the search box for **Examples**. Use **Target**, **Me**, or **Dungeon** to insert a shortcut, or add a level, boss, stat, crafted, or upgrade filter. The pocket-watch icon opens **History**, which by default keeps the last 10 searches you ran from a menu or slash command, confirmed with Enter, opened a result for, or left in the box when closing the window. Click a query in either menu to run it. Use the search cog or WoW AddOns settings to change the history limit and choose which result categories appear in a broad search. Select **Open AddOn Settings** in the cog popup to jump to the full settings page.
 
 Search by English item name, numeric ID, or pasted item link. Press Enter after typing to run the search and move keyboard navigation to the results out of combat. Use Up and Down to browse results, scroll one row at a time with the mouse wheel, or drag the scrollbar on longer lists. On a selected result, Enter or Right opens the actions menu when available. Use Up and Down to browse the menu, Enter to choose, and Left to return to the results. Enter activates results that have no menu. Hover for a tooltip, click to inspect, Shift-click to insert a link into open chat, or Ctrl-click to try on supported equipment. Escape closes the current menu or the search overlay. Drag the bottom-right corner to resize the overlay. The window width and maximum number of visible rows are saved between sessions.
 
-Right-click a result to follow its related searches. Use **Show item sources** for indexed drops, vendors, and containers, or enter `@sources <item ID>`. The menu also identifies quests that require or reward the item. Stranglekelp links to recipes that use it, gathering requirements and known QuestieDB locations, and Herbalism trainers. Use **Result context menus** in the search cog or WoW AddOns settings to turn off the added actions.
+Right-click a result to follow its related searches. Use **Show item sources** for indexed drops, vendors, and containers, or enter `@sources <item ID>`. Vendors show their known zones and sort by proximity when location data is available. Stranglekelp links to recipes that use it, gathering requirements and known QuestieDB locations, and Herbalism trainers. Item menus also identify quests that require or reward the item. Turn off **Quest reward links** in WoW AddOns settings to show only quests that require it.
 
-Use **Add map pin** on an NPC, mob, vendor, or quest contact with known QuestieDB coordinates. Right-click a quest result to pin its starting location. Choose a zone and coordinates when there are several matches. Each pin replaces the previous Quick Item Search marker or sets WoW's user waypoint when available. Right-click a Quick Item Search marker on the world map to remove it. **Map pin actions** controls these menu entries in the search cog and WoW AddOns settings.
+Use **Add map pin** on an NPC, mob, vendor, or quest contact with known QuestieDB coordinates. Right-click a quest result to pin its starting location. Choose a zone and coordinates when there are several matches. Each pin replaces the previous Quick Item Search marker or sets WoW's user waypoint when available. Right-click a Quick Item Search marker on the world map to remove it.
 
 With AtlasLoot Classic Forever enabled, search for a boss by name to see its loot. Use `boss:<name>` to prioritize the boss's loot. Items marked **PTR Only** in the bundled client data are filtered out.
 
 Target an NPC and type `@target` or `@t` to see its indexed drops from AtlasLoot and QuestieDB. The results update when you switch targets while that query is open.
 
-With QuestieDB enabled, regular name searches can include an **NPCs and Mobs** section. Use `@npc hogger` or `@mob hogger` to search only creatures, then select a match to see its known zones and spawn coordinates. Use `@npc 448` to open a known NPC ID directly. You can hide the automatic section in the search window's cog menu or the addon's WoW settings and still use both shortcuts.
+Regular name searches can include an **NPCs and Mobs** section. Use `@npc hogger` or `@mob hogger` to search only creatures, then select a match to see its known zones and spawn coordinates. Use `@npc 448` to open a known NPC ID directly. You can hide the automatic section in the search window's cog menu or the addon's WoW settings and still use both shortcuts.
 
-NPC details include a **Loot** section when QuestieDB, AtlasLoot, or Forever Dungeon Journal has indexed drops. Hover an item for its tooltip or click it to inspect. The **NPC Loot** option in either settings menu controls this section.
+NPC details include a **Loot** section when QuestieDB, AtlasLoot, or Forever Dungeon Journal has indexed drops. The **Sells** section lists items QuestieDB associates with the vendor. Hover an item for its tooltip or click it to inspect. Check the merchant window for prices and current stock.
 
-The **Sells** section lists items QuestieDB associates with that vendor. Hover or click these items to inspect them, and use the **Vendor Items** option in either settings menu to show or hide the section. Check the in-game merchant window for prices and current stock.
+Click **Loot** or **Sells** to collapse or expand it. Use **NPC Loot** and **Vendor Items** in WoW AddOns settings to control whether those sections appear.
 
-With QuestieDB enabled, a plain search like `pie` includes matching names under **Quests**. Use `@quest` or `@q` to search only quest names, or use `@quest 86` to open a quest directly. Select a quest to see its zone, start and turn-in contacts, objectives, and indexed item rewards. Hover or click the required and reward items to inspect them. Right-click any required item in the search results to open one of the quests that uses it. Quests in your log also show live objective progress when the game provides it.
+A plain search like `pie` includes matching names under **Quests**. Use `@quest` or `@q` to search only quest names, or use `@quest 86` to open a quest directly. Select a quest to see its zone, start and turn-in contacts, objectives, and indexed item rewards. Hover or click the required and reward items to inspect them. Right-click any required item in the search results to open one of the quests that uses it. Quests in your log also show live objective progress when the game provides it.
 
-Select a quest under **Previous quests** or **Next quests** to open its details. Both lists show the closest links first, with labels for how many steps each quest is from the one you're viewing. You can show or hide either list in the search options.
+Select a quest under **Previous quests** or **Next quests** to open its details. Both lists show the closest links first, with labels for how many steps each quest is from the one you're viewing. Click either heading to collapse or expand the list. Both visibility options are under **Detail view sections** in WoW AddOns settings.
 
 Search for a partial name or abbreviation like `zul farrak`, `zf`, or `brd` and click a match under **Dungeons** to open its loot view. Use `@dungeon`, `@instance`, `@d`, `@dung`, or `@inst` to go straight to loot from AtlasLoot and Forever Dungeon Journal. These shortcuts accept the same names and abbreviations. `dm` includes both Deadmines and Dire Maul. Omit the name after a shortcut to look up your current dungeon or raid. Drops are grouped by boss, with a separate Trash section when available. The summary shows the instance level range and boss headings show levels when known. Results show rare-or-better items and uncommon-or-better recipes.
 
@@ -40,7 +40,7 @@ With **What's Training** installed and enabled, type `warlock 12`, `warrior 10`,
 
 Use `spells warlock`, `warlock spell`, or either word order with any of the nine classes to browse that class's full spell list in its own section. What's Training adds unlock levels and trainer or quest sources where it has data. Without What's Training, class browsing uses the client-generated spell index. Spells outside the provider's catalog remain visible in the full list.
 
-Search `@spell bite` for hunter pet ability ranks or `@spell bite 3` for a specific rank. Right-click a **Hunter pet** result to see the required pet level and the beasts that teach the ability, with their wild levels and zones. Click the result to open these details when context menus are disabled. With QuestieDB enabled, select a beast to look up its locations. Taming data comes from [Petopia Forever](https://www.wow-petopia.com/forever/abilities.php).
+Search `@spell bite` for hunter pet ability ranks or `@spell bite 3` for a specific rank. Click or right-click a **Hunter pet** result to see the required pet level and the beasts that teach the ability, with their wild levels and zones. Select a beast to look up its locations. Taming data comes from [Petopia Forever](https://www.wow-petopia.com/forever/abilities.php).
 
 Use `petspells` or `@petspells` to browse all hunter pet abilities. The singular forms `petspell` and `@petspell` work too. Add a name and optional rank to filter, such as `@petspell bite 3`.
 
@@ -130,11 +130,13 @@ The bundled index contains 24,565 names from the English ItemSparse table instal
 
 Install through [CurseForge](https://www.curseforge.com/wow/addons/quick-item-search), or extract the ZIP from [GitHub Releases](https://github.com/iltGames/QuickItemSearch/releases) into `_forever_/Interface/AddOns`. The ZIP installs into the `QuickItemSearch` folder.
 
+[QuestieDB](https://www.curseforge.com/wow/addons/questiedb) is required. Use its Forever build and enable it for the characters that use Quick Item Search. If WoW reports a missing dependency even though QuestieDB is installed, check that its folder contains `QuestieDB_Camelot.toc`. The [QuestieDB GitHub releases](https://github.com/Questie/QuestieDB/releases) offer Forever builds with this compatibility file.
+
 ### Sources and drop rates
 
 Quick Item Search uses [AtlasLoot Classic Forever](https://www.curseforge.com/wow/addons/atlasloot-forever) for dungeon and raid loot and [QuestieDB](https://www.curseforge.com/wow/addons/questiedb) for NPCs, containers, vendors, and quest rewards. When Questie also provides a rate for a drop, Quick Item Search can use it where AtlasLoot has no rate.
 
-The bundled index works on its own. Quick Item Search saves source details as you inspect results and uses that local backup when a provider has no matching entry or is unavailable. On a fresh install, sources appear as they are loaded from an installed provider. Rates only appear when a provider supplies one.
+The addon includes its own item index. Quick Item Search saves source details as you inspect results and uses that local backup when a provider has no matching entry or is unavailable. On a fresh install, sources appear as they are loaded from an installed provider. Rates only appear when a provider supplies one.
 
 ## Development
 

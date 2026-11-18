@@ -109,7 +109,7 @@ assert(load, "Reward loading must allow the quest details to appear first")
 load(function(found) rows = found end)
 RunTimers()
 assert(FindName("Reward").id == 789 and not FindName("Reward").kind)
-assert(FindName("Next quests").sectionHeader)
+assert(FindName("Next quests").sectionHeader and FindName("Next quests").collapsible == 7)
 for _, name in ipairs({ "Back to Billy", "Send a Letter", "Visit the Farm", "Check In", "One More Favor" }) do
     assert(FindName(name).kind == "quest", "Follow-up should be clickable: " .. name)
 end
@@ -132,7 +132,8 @@ end
 assert(objectiveItems == 1 and rewardItems == 1, "Each item should appear once in its group")
 assert(not FindName("Previous quest"), "A quest without a prerequisite must omit the section")
 rows = addon.Search("@quest 84")
-assert(FindName("Previous quest").sectionHeader and FindName("Pie for Billy").kind == "quest")
+assert(FindName("Previous quest").collapsible == 1 and FindName("Previous quest").sectionKey == "Previous quests")
+assert(FindName("Pie for Billy").kind == "quest")
 rows = addon.Search("@quest 91")
 assert(FindName("Previous quests").sectionHeader)
 assert(FindName("Pie for Billy").id == 86 and FindName("Back to Billy").id == 84)
