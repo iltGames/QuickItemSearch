@@ -115,8 +115,8 @@ do
     assert(addon.Search("@sources 100")[2].id == 54, "Use the current zone name when the player map is unavailable")
     QuickItemSearchSettings = { nearestVendorsFirst = false }
     sources = addon.Search("@sources 100")
-    assert(sources[2].id == 51 and sources[6].id == 54 and sources[6].vendorZone == "Westfall",
-        "Disabling proximity sorting should restore the provider order and primary zones")
+    assert(sources[2].id == 54 and sources[2].vendorZone == "Tirisfal Glades",
+        "An old saved opt-out should no longer disable vendor proximity sorting")
     QuickItemSearchSettings, LibQuestieDB, C_Map, GetRealZoneText, CreateVector2D =
         nil, provider, originalMap, originalZoneText, nil
 end
@@ -131,6 +131,8 @@ assert(#FindSection(immediateSections, "Loot") == 2, "Journal loot should appear
 local loot, locations, sold
 loadLoot(function(found, _, _, _, sections)
     assert(sections.title == "Locations")
+    assert(sections[1].title == "Loot" and sections[1].collapsible)
+    assert(sections[2].title == "Sells" and sections[2].collapsible)
     locations, loot = found, FindSection(sections, "Loot")
     sold = FindSection(sections, "Sells")
 end)
@@ -142,7 +144,7 @@ assert(sold and #sold == 2 and sold[1].id == 1 and sold[2].id == 8 and not sold[
     "Show distinct items sold by the selected NPC as ordinary item rows")
 local _, _, loadWithoutLocations = addon.Search("@npc 40")
 loadWithoutLocations(function(found, title, _, _, sections)
-    assert(#found == 1 and found[1].id == 4 and sections.title == "Loot")
+    assert(#found == 1 and found[1].id == 4 and sections.title == "Loot" and sections.collapsible)
     assert(title:find("No known locations.", 1, true))
 end)
 local _, _, loadNoLoot = addon.Search("@npc 30")

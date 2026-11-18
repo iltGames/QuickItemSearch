@@ -1,3 +1,10 @@
+## Quick Item Search 0.4.11
+
+- Use the search cog for history and automatic result filters. Open the full AddOns settings directly from the cog.
+- Expand or collapse quest chains, NPC loot, and vendor inventory in their detail views. Manage their default visibility and quest reward links in AddOns settings.
+- Vendors show their known zones and sort by proximity when location data is available. Related result actions and map pins are available wherever supported.
+- QuestieDB is now required. Install its Forever build to use Quick Item Search.
+
 ## Quick Item Search 0.4.10
 
 - Restore gathering locations that Questie hides from its map display. Iron Deposit searches show the other indexed zones alongside Arathi Highlands.

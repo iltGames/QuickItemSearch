@@ -2,10 +2,14 @@ local function Noop() end
 
 local resizeHandle
 local buttons, checkboxes, sliders = {}, {}, {}
-local addonOptions
+local addonOptions, openedSettingsCategory
 Settings = {
-    RegisterCanvasLayoutCategory = function(panel) addonOptions = panel; return {} end,
+    RegisterCanvasLayoutCategory = function(panel)
+        addonOptions = panel
+        return { GetID = function() return 123 end }
+    end,
     RegisterAddOnCategory = Noop,
+    OpenToCategory = function(id) openedSettingsCategory = id end,
 }
 GetBindingKey = Noop
 GetBindingAction = Noop
@@ -323,10 +327,9 @@ assert(sourceWithoutQuestie and not sourceWithoutQuestie.enabled and not sourceW
     "The menu must still show the beast's level and zone without QuestieDB")
 QuickItemSearchSettings.resultContextMenus = false
 toggle("@spell bite 3")
-petRow:Click()
+petRow.scripts.OnClick(petRow, "RightButton")
 assert(sourceWithoutQuestie:IsShown() and sourceWithoutQuestie.parent:IsShown(),
-    "Primary activation should open pet training details with context menus off")
-QuickItemSearchSettings.resultContextMenus = true
+    "Old context menu settings should not hide pet training details")
 LibQuestieDB = { Npc = { Get = Noop, GetAllIds = function() return {} end } }
 toggle("@spell bite 3")
 petRow.scripts.OnClick(petRow, "RightButton")
@@ -420,24 +423,34 @@ assert(PressWindowKey("W") and not window.keyboardEnabled,
     "movement must pass through and end result navigation")
 
 local questProgress = "1/4"
-function addon.IsQuestDetailQuery(query) return query == "@quest 86" end
+local morePrerequisites
+function addon.IsQuestDetailQuery(query) return query == "@quest 86" or query == "@quest 84" end
 function addon.Search(query)
     if query == "@quest pie" then
         return { { kind = "quest", id = 86, name = "Pie for Billy" } }
     end
     if query == "@quest 84" then
-        return {
-            { kind = "text", name = "Previous quest", sectionHeader = true },
+        local previousQuests = {
+            { kind = "text", name = morePrerequisites and "Previous quests" or "Previous quest",
+                sectionHeader = true, collapsible = morePrerequisites and 2 or 1, sectionKey = "Previous quests" },
             { kind = "quest", id = 86, name = "Pie for Billy" },
-        }, "Back to Billy"
+        }
+        if morePrerequisites then
+            previousQuests[#previousQuests + 1] = { kind = "quest", id = 85, name = "An Earlier Quest" }
+        end
+        return previousQuests, "Back to Billy"
     end
     assert(query == "@quest 86")
-    return {
+    local detailRows = {
         { kind = "text", name = "Collect meat", matchLabel = questProgress },
         { id = 769, name = "Chunk of Boar Meat" },
-        { kind = "text", name = "Next quests", sectionHeader = true },
+        { kind = "text", name = "Next quests", sectionHeader = true, collapsible = 1 },
         { kind = "quest", id = 84, name = "Back to Billy" },
-    }, "Pie for Billy"
+    }
+    if questProgress == "3/4" then
+        table.insert(detailRows, 2, { kind = "text", name = "Reward details loaded" })
+    end
+    return detailRows, "Pie for Billy"
 end
 C_Item = {
     IsItemDataCachedByID = function(id)
@@ -493,9 +506,17 @@ quest.scripts.OnEnter(quest)
 quest:Click()
 assert(searchBox:GetText() == "@quest 86", "Clicking a quest should open its detail query")
 assert(not GetCurrentKeyBoardFocus() and PressWindowKey("W"), "Opening quest details must release typing focus")
+local nextQuests = assert(Result(function(entry) return entry.toggleSection == "Next quests" end))
+nextQuests:Click()
+assert(not Result(function(entry) return entry.id == 84 end), "A quest chain should collapse even with one link")
 questProgress = "3/4"
 window.scripts.OnEvent(window, "QUEST_LOG_UPDATE")
 assert(Result(function(entry) return entry.matchLabel == "3/4" end), "Open quest details should refresh progress")
+assert(not Result(function(entry) return entry.id == 84 end), "Progress updates should preserve collapsed chains")
+nextQuests = assert(Result(function(entry) return entry.toggleSection == "Next quests" end))
+assert(nextQuests.selection:IsShown(), "Inserting quest details should keep the chain toggle selected")
+assert(not PressWindowKey("RIGHT"), "Right should expand the selected quest chain")
+assert(Result(function(entry) return entry.id == 84 end))
 searchBox:SetFocus()
 local objectiveItem = assert(Result(function(entry) return entry.id == 769 end))
 objectiveItem:Click()
@@ -504,13 +525,60 @@ assert(not GetCurrentKeyBoardFocus() and objectiveItem.selection:IsShown() and w
     "Clicking an item should give the selected result keyboard navigation")
 assert(not PressWindowKey("DOWN"), "Arrow navigation should continue from a clicked item")
 local followUp = assert(Result(function(entry) return entry.kind == "quest" and entry.id == 84 end))
-assert(followUp.selection:IsShown(), "Down should select the first navigable row after the clicked item")
+assert(nextQuests.selection:IsShown(), "Down should select the quest chain toggle")
+assert(not PressWindowKey("DOWN") and followUp.selection:IsShown(), "Down should move into the open chain")
+assert(not PressWindowKey("UP") and nextQuests.selection:IsShown(), "Up should return to the chain toggle")
 assert(not PressWindowKey("UP") and objectiveItem.selection:IsShown(), "Up should return to the clicked row")
 Result(function(entry) return entry.kind == "quest" and entry.id == 84 end):Click()
 assert(searchBox:GetText() == "@quest 84", "Clicking a follow-up should open its quest details")
 assert(not GetCurrentKeyBoardFocus() and PressWindowKey("W"), "Following a quest link must leave movement keys free")
+assert(Result(function(entry) return entry.name == "Previous quest" end)):Click()
+morePrerequisites = true
+window.scripts.OnEvent(window, "QUEST_LOG_UPDATE")
+assert(not Result(function(entry) return entry.id == 86 end),
+    "A collapsed chain should stay collapsed when more prerequisites are found")
+assert(Result(function(entry) return entry.name == "Previous quests" end)):Click()
 Result(function(entry) return entry.kind == "quest" and entry.id == 86 end):Click()
 assert(searchBox:GetText() == "@quest 86", "Clicking a prerequisite should open its quest details")
+
+do
+    local questSearch = addon.Search
+    local finishNPC
+    local loot = { kind = "text", name = "Indexed drop" }
+    local sold = { kind = "text", name = "Vendor supply" }
+    function addon.Search()
+        return { loot }, nil, function(done) finishNPC = done end, nil, { title = "Loot", collapsible = true }
+    end
+    toggle("@npc 448")
+    local lootHeader = assert(Result(function(entry) return entry.toggleSection == "Loot" end))
+    assert(Result(function(entry) return entry == loot end), "NPC loot should start expanded")
+    lootHeader:Click()
+    assert(not Result(function(entry) return entry == loot end))
+    local lastStock = { kind = "text", name = "Fourth vendor item" }
+    finishNPC({ { kind = "text", name = "Known location" } }, nil, nil, nil, {
+        title = "Locations", { title = "Loot", rows = { loot }, collapsible = true }, {
+            title = "Sells", collapsible = true,
+            rows = { sold, { kind = "text", name = "Second vendor item" },
+                { kind = "text", name = "Third vendor item" }, lastStock },
+        },
+    })
+    assert(not Result(function(entry) return entry == loot end), "NPC loading should preserve collapsed loot")
+    lootHeader = assert(Result(function(entry) return entry.toggleSection == "Loot" end))
+    assert(lootHeader.selection:IsShown(), "Inserting NPC details should keep the loot toggle selected")
+    assert(Result(function(entry) return entry == sold end), "Newly loaded items should start expanded")
+    assert(not Result(function(entry) return entry == lastStock end), "Open NPC sections should still preview long lists")
+    assert(Result(function(entry) return entry.toggleSection == "Sells" and not entry.sectionHeader end)):Click()
+    assert(Result(function(entry) return entry == lastStock end), "Show all should reveal the full stock list")
+    local sellsHeader = assert(Result(function(entry) return entry.toggleSection == "Sells" and entry.sectionHeader end))
+    sellsHeader:Click()
+    assert(not Result(function(entry) return entry == sold end), "Vendor stock should collapse independently")
+    sellsHeader:Click()
+    assert(Result(function(entry) return entry == lastStock end), "Reopening stock should retain the full list selection")
+    sellsHeader:Click()
+    lootHeader:Click()
+    assert(Result(function(entry) return entry == loot end), "Clicking the loot header should show its rows again")
+    addon.Search = questSearch
+end
 
 toggle("@quest pie")
 searchBox.scripts.OnArrowPressed(searchBox, "DOWN")
@@ -748,6 +816,10 @@ assert(closeButton.rightX > 0 and closeButton.rightY > 0 and closeButton.rightY 
 optionsButton:Click()
 local compact = assert(QuickItemSearchOptionsFrame, "Options must open a compact window")
 assert(compact:IsShown())
+FindButton("Open AddOn Settings", compact):Click()
+assert(openedSettingsCategory == 123, "The popup should open the registered addon settings category")
+assert(not compact:IsShown() and window:IsShown(), "Opening settings should close only the options popup")
+optionsButton:Click()
 local compactQuests = SectionCheckbox(compact, "Quests")
 assert(compactQuests:GetChecked())
 local before = visibleSearches
@@ -766,27 +838,20 @@ local function PreferenceCheckbox(panel, label)
     for _, check in ipairs(checkboxes) do
         if check.parent == panel and check.label and check.label:GetText() == label then return check end
     end
-    error("Missing preference: " .. label)
 end
-local compactRewards = PreferenceCheckbox(compact, "Quest reward links")
-local settingsRewards = PreferenceCheckbox(addonOptions, "Quest reward links")
-assert(compactRewards:GetChecked() and settingsRewards:GetChecked(), "Quest reward links should be on by default")
-
-local compactFollowUps = SectionCheckbox(compact, "Next quests")
-local settingsFollowUps = SectionCheckbox(addonOptions, "Next quests")
-assert(compactFollowUps:GetChecked() and settingsFollowUps:GetChecked(), "Next quests should be on by default")
-settingsFollowUps:SetChecked(false)
-settingsFollowUps:Click()
-assert(not compactFollowUps:GetChecked() and QuickItemSearchSettings.hiddenSections["Next quests"] == true)
+local settingsRewards = assert(PreferenceCheckbox(addonOptions, "Quest reward links"))
+assert(settingsRewards:GetChecked(), "Quest reward links should be on by default")
+assert(not PreferenceCheckbox(compact, "Quest reward links"), "Quest reward links belong in AddOns settings")
 local reloaded = {}
 assert(loadfile("Search.lua"))("QuickItemSearch", reloaded)
-assert(not reloaded.IsAutomaticSectionEnabled("Next quests"), "Follow-up visibility should persist after reload")
-local compactPrerequisites = SectionCheckbox(compact, "Previous quests")
-local settingsPrerequisites = SectionCheckbox(addonOptions, "Previous quests")
-assert(compactPrerequisites:GetChecked() and settingsPrerequisites:GetChecked())
-compactPrerequisites:SetChecked(false)
-compactPrerequisites:Click()
-assert(not settingsPrerequisites:GetChecked() and not reloaded.IsAutomaticSectionEnabled("Previous quests"))
+for _, section in ipairs({ "Next quests", "Previous quests", "NPC Loot", "Vendor Items" }) do
+    local check = assert(PreferenceCheckbox(addonOptions, section))
+    assert(check:GetChecked() and not PreferenceCheckbox(compact, section),
+        "Detail preferences should default to visible and appear only in AddOns settings")
+    check:SetChecked(false)
+    check:Click()
+    assert(not reloaded.IsAutomaticSectionEnabled(section), "Detail preferences should use the saved section settings")
+end
 
 local compactNPCs = SectionCheckbox(compact, "NPCs and Mobs")
 local settingsNPCs = SectionCheckbox(addonOptions, "NPCs and Mobs")
@@ -795,50 +860,24 @@ settingsNPCs:SetChecked(false)
 settingsNPCs:Click()
 assert(not compactNPCs:GetChecked() and not reloaded.IsAutomaticSectionEnabled("NPCs and Mobs"),
     "NPC visibility should sync across menus and persist across reloads")
-local compactLoot = SectionCheckbox(compact, "NPC Loot")
-local settingsLoot = SectionCheckbox(addonOptions, "NPC Loot")
-assert(compactLoot:GetChecked() and settingsLoot:GetChecked(), "NPC loot should be on by default")
-compactLoot:SetChecked(false)
-compactLoot:Click()
-assert(not settingsLoot:GetChecked() and not reloaded.IsAutomaticSectionEnabled("NPC Loot"),
-    "NPC loot visibility should sync across menus and persist across reloads")
-local compactVendors = SectionCheckbox(compact, "Vendor Items")
-local settingsVendors = SectionCheckbox(addonOptions, "Vendor Items")
-assert(compactVendors:GetChecked() and settingsVendors:GetChecked(), "Vendor items should be on by default")
-settingsVendors:SetChecked(false)
-settingsVendors:Click()
-assert(not compactVendors:GetChecked() and not reloaded.IsAutomaticSectionEnabled("Vendor Items"),
-    "Vendor inventory visibility should sync across menus and persist across reloads")
-
-local compactVendorZones = PreferenceCheckbox(compact, "Vendor zones")
-local settingsVendorZones = PreferenceCheckbox(addonOptions, "Vendor zones")
-assert(compactVendorZones:GetChecked() and settingsVendorZones:GetChecked(), "Vendor zones should be on by default")
 do
     local search = addon.Search
     function addon.Search(query)
         if query ~= "@sources 1" then return search(query) end
         return { { kind = "npc", id = 10, name = "Merchant", matchLabel = "Vendor", vendorZone = "Elwynn Forest" } }
     end
+    QuickItemSearchSettings.vendorZones = false
     toggle("@sources 1")
     local merchant = assert(Result(function(entry) return entry.name == "Merchant" end))
     assert(merchant.label:GetText() == "Merchant" and merchant.idLabel:GetText() == "Vendor · Elwynn Forest",
-        "Show the zone on the right of the vendor name")
-    settingsVendorZones:SetChecked(false)
-    settingsVendorZones:Click()
-    assert(not compactVendorZones:GetChecked() and merchant.idLabel:GetText() == "Vendor",
-        "Disabling vendor zones should sync across menus and update the visible row")
+        "Show the vendor zone even when old settings disabled it")
     addon.Search = search
 end
 
-local compactNearestVendors = PreferenceCheckbox(compact, "Nearest vendors first")
-local settingsNearestVendors = PreferenceCheckbox(addonOptions, "Nearest vendors first")
-assert(compactNearestVendors:GetChecked() and settingsNearestVendors:GetChecked(),
-    "Nearest vendors first should be on by default")
-before = visibleSearches
-settingsNearestVendors:SetChecked(false)
-settingsNearestVendors:Click()
-assert(not compactNearestVendors:GetChecked() and visibleSearches == before + 1,
-    "Changing vendor sorting should sync across menus and refresh the search")
+for _, label in ipairs({ "Nearest vendors first", "Vendor zones", "Result context menus", "Map pin actions" }) do
+    assert(not PreferenceCheckbox(compact, label) and not PreferenceCheckbox(addonOptions, label),
+        "Always-on behavior should not have a checkbox: " .. label)
+end
 
 FindButton("50", compact):Click()
 for i = 1, 55 do toggle("search " .. i) end
@@ -870,18 +909,17 @@ assert(QuickItemSearchSettings.history[1] == "recorded")
 window:Hide()
 assert(not compact:IsShown(), "Options must close with the search window")
 
-compactRewards:SetChecked(false)
-compactRewards:Click()
-assert(not settingsRewards:GetChecked(), "The reward setting should sync across both menus")
+settingsRewards:SetChecked(false)
+settingsRewards:Click()
 addon.GetItemQuestRequirements = function() return {} end
 assert(loadfile("UI.lua"))("QuickItemSearch", addon)
 addonOptions:Hide()
 addonOptions:Show()
-local reloadedRewards = PreferenceCheckbox(addonOptions, "Quest reward links")
+local reloadedRewards = assert(PreferenceCheckbox(addonOptions, "Quest reward links"))
 assert(not reloadedRewards:GetChecked(), "Disabled quest reward links should persist after reload")
-assert(not PreferenceCheckbox(addonOptions, "Vendor zones"):GetChecked(), "Disabled vendor zones should persist after reload")
-assert(not PreferenceCheckbox(addonOptions, "Nearest vendors first"):GetChecked(),
-    "Disabled vendor proximity sorting should persist after reload")
+for _, section in ipairs({ "Next quests", "Previous quests", "NPC Loot", "Vendor Items" }) do
+    assert(not assert(PreferenceCheckbox(addonOptions, section)):GetChecked(), "Detail visibility should persist after reload")
+end
 function addon.Search(query)
     if query == "reward" then return { { id = 789, name = "Reward" } } end
     assert(query == "@quest 87" or query == "@quest 88")
@@ -918,11 +956,6 @@ end
 C_Spell = { GetSpellTexture = Noop }
 assert(loadfile("RecipeSearch.lua"))("QuickItemSearch", addon)
 assert(loadfile("Questions.lua"))("QuickItemSearch", addon)
-local function ContextCheckbox(panel, label)
-    for _, check in ipairs(checkboxes) do
-        if check.parent == panel and check.label:GetText() == (label or "Result context menus") then return check end
-    end
-end
 function addon.Search(query)
     if query == "kelp" then return { { id = 3820, name = "Stranglekelp" } } end
     if query == "usedin 3820" then return addon.FindRecipesUsingItems({ { id = 3820 } }) end
@@ -933,22 +966,7 @@ reloadToggle("kelp")
 local kelp = assert(Result(function(entry) return entry.id == 3820 end))
 kelp.scripts.OnClick(kelp, "RightButton")
 ClickQuery("usedin 3820")
-assert(Result(function(entry) return entry.id == 501 end), "The reagent menu must open recipes for that item ID")
-local contextCheck = assert(ContextCheckbox(QuickItemSearchOptionsFrame))
-local settingsContextCheck = assert(ContextCheckbox(addonOptions))
-assert(contextCheck:GetChecked() and settingsContextCheck:GetChecked())
-contextCheck:SetChecked(false)
-contextCheck:Click()
-assert(not settingsContextCheck:GetChecked(), "The context menu toggle must sync across settings")
-reloadToggle("kelp")
-kelp.scripts.OnClick(kelp, "RightButton")
-for _, button in ipairs(buttons) do
-    assert(button.query ~= "usedin 3820" or not button:IsShown() or not button.parent:IsShown(),
-        "Turning off context menus must hide the related recipe action")
-end
-assert(loadfile("UI.lua"))("QuickItemSearch", addon)
-addonOptions:Show()
-assert(not assert(ContextCheckbox(addonOptions)):GetChecked(), "The disabled setting must survive a UI reload")
+assert(Result(function(entry) return entry.id == 501 end), "The reagent menu must open recipes despite old settings")
 
 local placed
 local mobSpawns = { [12] = { { 26.25, 87 }, { 32, 75 } }, [40] = { { 12, 30 } } }
@@ -971,7 +989,7 @@ LibQuestieDB = {
         if field == "startedBy" then return { { 448 } } end
     end },
 }
-QuickItemSearchSettings.resultContextMenus = true
+QuickItemSearchSettings.mapPinActions = false
 function addon.Search(query)
     if query == "mob" then return { { kind = "npc", id = 448, name = "River Wolf" } } end
     if query == "quest" then return { { kind = "quest", id = 99, name = "Find the River Wolf" } } end
@@ -1008,20 +1026,8 @@ assert(searchBox:GetText() == "mob", "Placing a pin must not replace the current
 reloadToggle("quest")
 local startQuest = assert(Result(function(entry) return entry.kind == "quest" and entry.id == 99 end))
 startQuest.scripts.OnClick(startQuest, "RightButton")
-assert(PopupChoice("Add map pin"), "A quest result should link to its known starter coordinates")
-local pinCheck = assert(ContextCheckbox(QuickItemSearchOptionsFrame, "Map pin actions"))
-local settingsPinCheck = assert(ContextCheckbox(addonOptions, "Map pin actions"))
-pinCheck:SetChecked(false)
-pinCheck:Click()
-assert(not settingsPinCheck:GetChecked(), "The pin setting should sync across the two menus")
-startQuest.scripts.OnClick(startQuest, "RightButton")
-assert(not PopupChoice("Add map pin") and PopupChoice("Open quest"), "Disabling pins must preserve other actions")
-assert(loadfile("UI.lua"))("QuickItemSearch", addon)
-addonOptions:Show()
-settingsPinCheck = assert(ContextCheckbox(addonOptions, "Map pin actions"))
-assert(not settingsPinCheck:GetChecked(), "The map pin setting must persist after reload")
-settingsPinCheck:SetChecked(true)
-settingsPinCheck:Click()
+assert(PopupChoice("Add map pin") and PopupChoice("Open quest"),
+    "Old settings should not hide the quest's starter pin or other actions")
 SlashCmdList.QUICKITEMSEARCH("gather")
 local node = assert(Result(function(entry) return entry.kind == "text" and entry.areaID == 12 end))
 node.scripts.OnClick(node, "RightButton")

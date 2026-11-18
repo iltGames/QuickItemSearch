@@ -808,7 +808,7 @@ function addon.SearchItemSources(itemID)
             rows[#rows + 1] = row
         end
     end
-    if #vendors > 0 and addon.IsVendorProximityEnabled() then SortVendorRows(rows, vendors, db) end
+    if #vendors > 0 then SortVendorRows(rows, vendors, db) end
     return rows, #rows > 0 and ("Sources for " .. SourceTitle(itemID)) or "No indexed sources for this item."
 end
 

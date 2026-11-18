@@ -44,10 +44,10 @@ local function NPCDetails(npcs, id, name)
         if #loot == 0 and #sold == 0 then return locations, hint, load end
         local sections = {}
         if #locations > 0 then sections[#sections + 1] = { title = "Locations", rows = locations } end
-        if #loot > 0 then sections[#sections + 1] = { title = "Loot", rows = loot } end
-        if #sold > 0 then sections[#sections + 1] = { title = "Sells", rows = sold } end
+        if #loot > 0 then sections[#sections + 1] = { title = "Loot", rows = loot, collapsible = true } end
+        if #sold > 0 then sections[#sections + 1] = { title = "Sells", rows = sold, collapsible = true } end
         local first = table.remove(sections, 1)
-        sections.title = first.title
+        sections.title, sections.collapsible = first.title, first.collapsible
         return first.rows, hint, load, nil, sections
     end
 

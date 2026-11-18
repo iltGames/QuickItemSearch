@@ -4,9 +4,11 @@ manual-changelog:
   filename: CHANGELOG.md
   markup-type: markdown
 
+required-dependencies:
+  - questiedb
+
 optional-dependencies:
   - atlasloot-forever
-  - questiedb
 
 ignore:
   - .github

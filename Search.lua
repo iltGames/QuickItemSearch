@@ -3,7 +3,7 @@ local settingsKey = addonName .. "Settings"
 
 addon.automaticSections = {
     "Quests", "Dungeons", "Gathering", "Spells", "Recipes", "Emotes", "Trainers", "Boss Drops",
-    "Next quests", "Previous quests", "NPCs and Mobs", "NPC Loot", "Vendor Items",
+    "NPCs and Mobs",
 }
 
 local function IsAutomaticSectionEnabled(section)
@@ -13,11 +13,6 @@ local function IsAutomaticSectionEnabled(section)
 end
 
 addon.IsAutomaticSectionEnabled = IsAutomaticSectionEnabled
-
-function addon.IsVendorProximityEnabled()
-    local settings = _G[settingsKey]
-    return type(settings) ~= "table" or settings.nearestVendorsFirst ~= false
-end
 
 local searchShortcuts = {
     ["@target"] = "@target", ["@t"] = "@target",
