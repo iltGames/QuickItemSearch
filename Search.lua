@@ -1,9 +1,24 @@
-local _, addon = ...
+local addonName, addon = ...
+local settingsKey = addonName .. "Settings"
+
+addon.automaticSections = {
+    "Quests", "Dungeons", "Gathering", "Spells", "Recipes", "Emotes", "Trainers", "Boss Drops",
+    "Next quests", "Previous quests", "NPCs and Mobs", "NPC Loot", "Vendor Items",
+}
+
+local function IsAutomaticSectionEnabled(section)
+    local settings = _G[settingsKey]
+    local hidden = type(settings) == "table" and settings.hiddenSections
+    return type(hidden) ~= "table" or hidden[section] ~= true
+end
+
+addon.IsAutomaticSectionEnabled = IsAutomaticSectionEnabled
 
 local searchShortcuts = {
     ["@target"] = "@target", ["@t"] = "@target",
     ["@me"] = "@me", ["@gear"] = "@me",
     ["@quest"] = "@quest", ["@q"] = "@quest",
+    ["@npc"] = "@npc", ["@mob"] = "@npc",
     ["@dungeon"] = "@dungeon", ["@instance"] = "@dungeon",
     ["@d"] = "@dungeon", ["@dung"] = "@dungeon", ["@inst"] = "@dungeon",
 }
@@ -68,6 +83,42 @@ function addon.FindNamedEntries(entries, query)
         end
     end
     return results, exactCount
+end
+
+-- Keep building the catalog when the search changes, while dropping cancelled listeners.
+function addon.ReadQuestieIndex(cache, entity, add)
+    if not entity or not entity.Get or not entity.GetAllIds then return {} end
+    local state = cache.state
+    if not state or state.entity ~= entity then
+        state = { entity = entity, values = {}, listeners = {} }
+        cache.state = state
+    end
+    if state.ready then return state.values end
+
+    return nil, function(done)
+        local listeners = state.listeners
+        listeners[done] = true
+        if not state.started then
+            state.started = true
+            local ok, ids = pcall(entity.GetAllIds)
+            ids = ok and type(ids) == "table" and ids or {}
+            local first = 1
+            local function Step()
+                local last = math.min(first + 199, #ids)
+                for i = first, last do add(state.values, entity, ids[i]) end
+                if last < #ids then
+                    first = last + 1
+                    C_Timer.After(0, Step)
+                    return
+                end
+                state.ready = true
+                for listener in pairs(listeners) do listener(state.values) end
+                state.listeners = {}
+            end
+            C_Timer.After(0, Step)
+        end
+        return function() listeners[done] = nil end
+    end
 end
 
 local questionPrefixes = {
@@ -180,21 +231,30 @@ local function SectionResults(query, items, exactCount, primary, title, hint, an
     end
     if itemsFirst then Add(title, primary) end
     if names then
-        Add("Quests", names.quests)
-        Add("Dungeons", names.dungeons)
+        if IsAutomaticSectionEnabled("Quests") then Add("Quests", names.quests) end
+        if IsAutomaticSectionEnabled("Dungeons") then Add("Dungeons", names.dungeons) end
+        if IsAutomaticSectionEnabled("NPCs and Mobs") then Add("NPCs and Mobs", names.npcs) end
     end
     if query ~= "" and not tonumber(query) then
-        Add("Gathering", gathering)
-        if not seen.Spells and addon.SearchPlayerSpells then Add("Spells", addon.SearchPlayerSpells(query)) end
-        if not (seen.Recipes or seen.Enchanting) then
+        if IsAutomaticSectionEnabled("Gathering") then Add("Gathering", gathering) end
+        if IsAutomaticSectionEnabled("Spells") and not seen.Spells and addon.SearchPlayerSpells then
+            Add("Spells", addon.SearchPlayerSpells(query))
+        end
+        if IsAutomaticSectionEnabled("Recipes") and not (seen.Recipes or seen.Enchanting) then
             local useNodes = gathering and gathering[1] and gathering[1].answer
             Add("Recipes", RelatedRecipes(query, useNodes and gathering or items,
                 useNodes and #gathering or exactCount))
         end
-        if not seen.Emotes and addon.SearchEmotes then Add("Emotes", addon.SearchEmotes(query)) end
-        if not seen.Trainers and addon.SearchTraining then Add("Trainers", addon.SearchTraining(query, false)) end
-        if not seen["Boss Drops"] and addon.SearchBossLoot then Add("Boss Drops", addon.SearchBossLoot(query)) end
-    elseif not primary then
+        if IsAutomaticSectionEnabled("Emotes") and not seen.Emotes and addon.SearchEmotes then
+            Add("Emotes", addon.SearchEmotes(query))
+        end
+        if IsAutomaticSectionEnabled("Trainers") and not seen.Trainers and addon.SearchTraining then
+            Add("Trainers", addon.SearchTraining(query, false))
+        end
+        if IsAutomaticSectionEnabled("Boss Drops") and not seen["Boss Drops"] and addon.SearchBossLoot then
+            Add("Boss Drops", addon.SearchBossLoot(query))
+        end
+    elseif not primary and IsAutomaticSectionEnabled("Recipes") then
         Add("Recipes", RelatedRecipes("", items, exactCount))
     end
 
@@ -206,16 +266,35 @@ local function SectionResults(query, items, exactCount, primary, title, hint, an
 end
 
 local function SearchGeneral(query, items, exactCount)
-    local quests, loadQuests
-    if addon.FindQuestTitles then quests, loadQuests = addon.FindQuestTitles(query) end
-    local names = { quests = quests, dungeons = addon.FindDungeons and addon.FindDungeons(query) }
-    local rows, hint, _, answer, sections = SectionResults(query, items, exactCount, nil, nil, nil, nil, nil, names)
-    if not loadQuests then return rows, hint, nil, answer, sections end
-    return rows, #rows == 0 and "Searching quests…" or hint, function(done)
-        return loadQuests(function(found)
-            names.quests = found
-            done(SectionResults(query, items, exactCount, nil, nil, nil, nil, nil, names))
-        end)
+    local names, loaders = {}, {}
+    if IsAutomaticSectionEnabled("Quests") and addon.FindQuestTitles then
+        names.quests, loaders.quests = addon.FindQuestTitles(query)
+    end
+    if IsAutomaticSectionEnabled("NPCs and Mobs") and addon.FindNPCNames then
+        names.npcs, loaders.npcs = addon.FindNPCNames(query)
+    end
+    names.dungeons = IsAutomaticSectionEnabled("Dungeons") and addon.FindDungeons and addon.FindDungeons(query)
+    local function Results()
+        return SectionResults(query, items, exactCount, nil, nil, nil, nil, nil, names)
+    end
+    local rows, hint, _, answer, sections = Results()
+    if not next(loaders) then return rows, hint, nil, answer, sections end
+    local loading = loaders.quests and (loaders.npcs and "Searching quests and NPCs…" or "Searching quests…")
+        or "Searching NPCs…"
+    return rows, #rows == 0 and loading or hint, function(done)
+        local cancels = {}
+        local waiting = loaders.quests and loaders.npcs and 2 or 1
+        local function Listen(key, load)
+            cancels[#cancels + 1] = load(function(found)
+                names[key] = found
+                waiting = waiting - 1
+                if waiting == 0 then done(Results()) end
+            end)
+        end
+        for key, load in pairs(loaders) do Listen(key, load) end
+        return function()
+            for _, cancel in ipairs(cancels) do cancel() end
+        end
     end, answer, sections
 end
 
@@ -313,6 +392,7 @@ function addon.Search(input)
     shortcut = shortcut or lowerQuery
     local command = addon.GetSearchShortcut(shortcut)
     if command == "@quest" and addon.SearchQuests then return addon.SearchQuests(shortcutQuery or "") end
+    if command == "@npc" and addon.SearchNPCs then return addon.SearchNPCs(shortcutQuery or "") end
     if command == "@target" and not shortcutQuery then return addon.SearchTargetLoot() end
     local petShortcut = shortcut:gsub("^@", "")
     if petShortcut == "petspell" or petShortcut == "petspells" then

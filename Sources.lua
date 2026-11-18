@@ -163,14 +163,15 @@ function addon.GetBossDropItems(query)
     return drops
 end
 
-local function LootRows(ids, qualities, journalItems)
+local function SourceItemRows(ids, qualities, journalItems)
     local results = {}
     for id in pairs(ids) do
         if not addon.IsPTRItem(id) then
             local item = journalItems and journalItems[id]
             local name = addon.index[id] or (item and item[2])
             results[#results + 1] = {
-                id = id, name = name, key = name and name:lower() or "~", quality = qualities and qualities[id],
+                id = id, name = name, key = name and name:lower() or "~",
+                quality = qualities and qualities[id] or (item and item[4]),
             }
         end
     end
@@ -345,7 +346,7 @@ function addon.SearchInstanceLoot(query)
                 if qualities[id] then eligible[id] = true end
             end
             if next(eligible) then
-                sections[#sections + 1] = { title = group.title, rows = LootRows(eligible, qualities, journalItems) }
+                sections[#sections + 1] = { title = group.title, rows = SourceItemRows(eligible, qualities, journalItems) }
             end
         end
         local first = table.remove(sections, 1)
@@ -388,7 +389,7 @@ function addon.SearchBossLoot(query, exactOnly)
     for _, boss in ipairs(matches) do
         for id in pairs(boss.loot) do loot[id] = true end
     end
-    local results = LootRows(loot)
+    local results = SourceItemRows(loot)
     if #matches == 1 then return results, "Drops from " .. matches[1].name end
     return results, ("Drops from %d matching bosses"):format(#matches)
 end
@@ -400,54 +401,72 @@ local function HasID(ids, wanted)
     return false
 end
 
-function addon.SearchTargetLoot()
-    local guid = UnitGUID("target")
-    if issecretvalue and issecretvalue(guid) then return {}, "Target details are unavailable." end
-    local kind, id
-    if guid then kind, id = guid:match("^(%a+)%-[^-]+%-[^-]+%-[^-]+%-[^-]+%-(%d+)%-") end
-    if kind ~= "Creature" and kind ~= "Vehicle" then return {}, "Select an NPC to look up its drops." end
-    local npcID = tonumber(id)
-    local name = Clean(UnitName("target"))
-    local targetLabel = name and name ~= "" and name:gsub("|", "||") or ("NPC %d"):format(npcID)
-    local title = "Drops from " .. targetLabel
+local function EncounterLoot(npcID, name)
     local loot = {}
     local ok, _, bosses = pcall(AtlasIndex)
     if not ok then bosses = nil end
-    local nameKey = name and name:lower()
+    local nameKey = Clean(name)
+    if nameKey then nameKey = nameKey:lower() end
     for _, boss in ipairs(bosses or {}) do
         if boss.isEncounter and (HasID(boss.npcIDs, npcID) or (not boss.npcIDs and boss.key == nameKey)) then
             for itemID in pairs(boss.loot) do loot[itemID] = true end
         end
     end
+    local journalItems = {}
+    local journal = _G.ForeverDungeonJournal_NS
+    for _, dungeon in pairs(journal and journal.DB or {}) do
+        local encounters = type(dungeon) == "table" and dungeon.bosses
+        for _, boss in ipairs(encounters or {}) do
+            if boss.npcID == npcID and not boss.trash and not IsTrashList(Clean(boss.name) or "") then
+                for _, item in ipairs(boss.loot or {}) do
+                    if type(item[1]) == "number" and item[1] > 0 then
+                        loot[item[1]], journalItems[item[1]] = true, item
+                    end
+                end
+            end
+        end
+    end
 
-    local function Finish()
-        local rows = LootRows(loot)
-        return rows, #rows > 0 and title or ("No indexed drops for " .. targetLabel .. ".")
+    return loot, journalItems
+end
+
+function addon.FindNPCItems(npcID, name, showLoot, showVendors)
+    local loot, sold, journalItems = {}, {}
+    if showLoot then loot, journalItems = EncounterLoot(npcID, name) end
+
+    local function Results()
+        return SourceItemRows(loot, nil, journalItems), SourceItemRows(sold)
     end
 
     local db = _G.LibQuestieDB
     local items = db and db.Item
     if not (items and items.Get and items.GetAllIds) then
-        if not next(loot) then return {}, "No AtlasLoot match. QuestieDB can look up ordinary NPC drops." end
-        return Finish()
+        local drops, vendors = Results()
+        return drops, vendors, nil, not next(loot)
     end
     local idsOK, ids = pcall(items.GetAllIds)
-    if not idsOK or type(ids) ~= "table" or #ids == 0 then return Finish() end
+    if not idsOK or type(ids) ~= "table" or #ids == 0 then return Results() end
 
-    return LootRows(loot), title .. " · Checking QuestieDB", function(done)
+    local function CheckSource(itemID, field, found)
+        local readOK, sources = pcall(items.Get, itemID, field)
+        if readOK and type(sources) == "table" and HasID(sources, npcID) then
+            found[itemID] = true
+        end
+    end
+
+    local drops, vendors = Results()
+    return drops, vendors, function(done)
         local timer
         local first = 1
         local function Step()
             local last = math.min(first + 249, #ids)
             for index = first, last do
                 local itemID = ids[index]
-                local readOK, sources = pcall(items.Get, itemID, "npcDrops")
-                if readOK and type(sources) == "table" and HasID(sources, npcID) then
-                    loot[itemID] = true
-                end
+                if showLoot then CheckSource(itemID, "npcDrops", loot) end
+                if showVendors then CheckSource(itemID, "vendors", sold) end
             end
             if last == #ids then
-                done(Finish())
+                done(Results())
             else
                 first = last + 1
                 timer = C_Timer.NewTimer(0, Step)
@@ -455,6 +474,28 @@ function addon.SearchTargetLoot()
         end
         timer = C_Timer.NewTimer(0, Step)
         return function() timer:Cancel() end
+    end
+end
+
+function addon.SearchTargetLoot()
+    local guid = UnitGUID("target")
+    if issecretvalue and issecretvalue(guid) then return {}, "Target details are unavailable." end
+    local kind, id
+    if guid then kind, id = guid:match("^(%a+)%-[^-]+%-[^-]+%-[^-]+%-[^-]+%-(%d+)%-") end
+    if kind ~= "Creature" and kind ~= "Vehicle" then return {}, "Select an NPC to look up its drops." end
+    local npcID, name = tonumber(id), Clean(UnitName("target"))
+    local label = name and name ~= "" and name:gsub("|", "||") or ("NPC %d"):format(npcID)
+    local title = "Drops from " .. label
+    local drops, _, load, unavailable = addon.FindNPCItems(npcID, name, true, false)
+
+    local function Finish(rows)
+        return rows, #rows > 0 and title or ("No indexed drops for " .. label .. ".")
+    end
+
+    if unavailable then return drops, "No AtlasLoot match. QuestieDB can look up ordinary NPC drops." end
+    if not load then return Finish(drops) end
+    return drops, title .. " · Checking QuestieDB", function(done)
+        return load(function(found) done(Finish(found)) end)
     end
 end
 
@@ -653,6 +694,25 @@ function addon.GetItemQuestRequirements(itemID)
     return quests
 end
 
+local function IsQuestReward(source)
+    return source.kind == "quest" and type(source.id) == "number" and source.id > 0
+end
+
+function addon.GetItemQuestChoices(itemID, includeRewards)
+    local quests = addon.GetItemQuestRequirements(itemID)
+    if not includeRewards then return quests end
+
+    local seen = {}
+    for _, quest in ipairs(quests) do seen[quest.id] = true end
+    for _, source in ipairs(addon.GetItemSources(itemID)) do
+        if IsQuestReward(source) and not seen[source.id] then
+            quests[#quests + 1] = { id = source.id, name = source.name }
+            seen[source.id] = true
+        end
+    end
+    return quests
+end
+
 local function AppendQuestRequirements(tooltip, itemID)
     local quests = addon.GetItemQuestRequirements(itemID)
     if #quests == 0 then return false end
@@ -685,7 +745,8 @@ end
 function addon.AppendItemSources(tooltip, itemID)
     if not itemID or not tooltip or not tooltip.AddLine then return end
     local added = 0
-    for _, source in ipairs(addon.GetItemSources(itemID)) do
+    local sources = addon.GetItemSources(itemID)
+    for _, source in ipairs(sources) do
         if not AtlasLineAlreadyShown(tooltip, source) then
             if added == 6 then
                 tooltip:AddLine("Additional sources omitted.", 0.71, 0.66, 0.57, true)
@@ -702,5 +763,9 @@ function addon.AppendItemSources(tooltip, itemID)
             added = added + 1
         end
     end
-    return AppendQuestRequirements(tooltip, itemID)
+    local hasRequirement = AppendQuestRequirements(tooltip, itemID)
+    for _, source in ipairs(sources) do
+        if IsQuestReward(source) then return hasRequirement, true end
+    end
+    return hasRequirement, false
 end

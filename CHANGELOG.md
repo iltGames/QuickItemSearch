@@ -1,3 +1,9 @@
+## Quick Item Search 0.4.8
+
+- Search NPCs and mobs by name or ID with `@npc` or `@mob`. Select a result to see known zones and spawn coordinates, indexed loot, and items the NPC sells when available.
+- Use the search cog or WoW AddOns settings to choose which result sections appear and how many searches History keeps.
+- Open previous and next quests from quest details. Right-click items to find quests that require or reward them. You can turn off reward links in search options.
+
 ## Quick Item Search 0.4.7
 
 - Show which quests require an item in search result tooltips when QuestieDB is enabled.

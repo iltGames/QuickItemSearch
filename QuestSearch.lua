@@ -1,5 +1,5 @@
 local _, addon = ...
-local titleIndex, rewardIndex = {}, {}
+local questIndex, rewardIndex = {}, {}
 
 local function Read(entity, id, field)
     if not entity or not entity.Get then return end
@@ -22,48 +22,53 @@ function addon.IsQuestDetailQuery(query)
     return addon.GetSearchShortcut(shortcut) == "@quest" and Unquote(target):match("^%d+$") ~= nil
 end
 
--- Keep an in-progress scan when the query changes, but drop its cancelled listeners.
-local function ReadIndex(cache, entity, add)
-    if not entity or not entity.Get or not entity.GetAllIds then return {} end
-    local state = cache.state
-    if not state or state.entity ~= entity then
-        state = { entity = entity, values = {}, listeners = {} }
-        cache.state = state
-    end
-    if state.ready then return state.values end
-
-    return nil, function(done)
-        local listeners = state.listeners
-        listeners[done] = true
-        if not state.started then
-            state.started = true
-            local ok, ids = pcall(entity.GetAllIds)
-            ids = ok and type(ids) == "table" and ids or {}
-            local first = 1
-            local function Step()
-                local last = math.min(first + 199, #ids)
-                for i = first, last do add(state.values, entity, ids[i]) end
-                if last < #ids then
-                    first = last + 1
-                    C_Timer.After(0, Step)
-                    return
-                end
-                state.ready = true
-                for listener in pairs(listeners) do listener(state.values) end
-                state.listeners = {}
-            end
-            C_Timer.After(0, Step)
-        end
-        return function() listeners[done] = nil end
-    end
-end
-
 local function AddQuestTitle(entries, quests, id)
     local name = Text(Read(quests, id, "name"))
     if name then
         entries[#entries + 1] = { kind = "quest", id = id, name = name, key = name:lower(),
             matchLabel = ("Quest %d"):format(id) }
     end
+end
+
+local function QuestPrerequisites(quests, id)
+    local single = Read(quests, id, "preQuestSingle")
+    if single then return single, false end
+    return Read(quests, id, "preQuestGroup"), true
+end
+
+local function ReadQuestLinks(quests, id, link)
+    local prerequisites, grouped = QuestPrerequisites(quests, id)
+    for _, prerequisite in ipairs(prerequisites or {}) do
+        -- Negative group entries still require that quest, but skip its alternatives.
+        link(grouped and math.abs(prerequisite) or prerequisite, id)
+    end
+    link(id, Read(quests, id, "nextQuestInChain"))
+    link(id, Read(quests, id, "breadcrumbForQuestId"))
+    for _, questID in ipairs(Read(quests, id, "childQuests") or {}) do link(id, questID) end
+end
+
+local function AddDirection(index, from, to)
+    local links = index[from]
+    if not links then
+        links = {}
+        index[from] = links
+    end
+    links[#links + 1] = to
+end
+
+local function IndexQuestLinks(catalog, quests, id)
+    ReadQuestLinks(quests, id, function(previousID, nextID)
+        if type(previousID) ~= "number" or previousID <= 0 or type(nextID) ~= "number"
+            or nextID <= 0 or previousID == nextID then return end
+        AddDirection(catalog.followUps, previousID, nextID)
+        AddDirection(catalog.prerequisites, nextID, previousID)
+    end)
+end
+
+local function AddQuestRecord(catalog, quests, id)
+    if not catalog.titles then catalog.titles, catalog.followUps, catalog.prerequisites = {}, {}, {} end
+    AddQuestTitle(catalog.titles, quests, id)
+    IndexQuestLinks(catalog, quests, id)
 end
 
 local function AddItemRewards(rewards, items, id)
@@ -174,6 +179,43 @@ local function AddQuestItems(rows, db, title, itemIDs)
     end
 end
 
+local function AddQuestChain(rows, quests, id, links, title, direction)
+    local entries, queue, steps = {}, { id }, { [id] = 0 }
+    local first = 1
+    while first <= #queue do
+        local questID = queue[first]
+        local distance = steps[questID] + 1
+        for _, linkedID in ipairs(links[questID] or {}) do
+            if steps[linkedID] == nil then
+                steps[linkedID] = distance
+                queue[#queue + 1] = linkedID
+                local index = #entries + 1
+                AddQuestTitle(entries, quests, linkedID)
+                if entries[index] then
+                    entries[index].matchLabel = ("%d %s %s"):format(distance, distance == 1 and "step" or "steps", direction)
+                end
+            end
+        end
+        first = first + 1
+    end
+    if #entries == 0 then return end
+    if title == "Previous quests" and #entries == 1 then title = "Previous quest" end
+    rows[#rows + 1] = { kind = "text", name = title, sectionHeader = true }
+    for _, entry in ipairs(entries) do rows[#rows + 1] = entry end
+end
+
+local function AddQuestChains(rows, quests, id, catalog)
+    local showPrevious = addon.IsAutomaticSectionEnabled("Previous quests")
+    local showNext = addon.IsAutomaticSectionEnabled("Next quests")
+    if not showPrevious and not showNext then return end
+    if not catalog or not catalog.followUps then
+        catalog = { followUps = {}, prerequisites = {} }
+        IndexQuestLinks(catalog, quests, id)
+    end
+    if showPrevious then AddQuestChain(rows, quests, id, catalog.prerequisites, "Previous quests", "back") end
+    if showNext then AddQuestChain(rows, quests, id, catalog.followUps, "Next quests", "ahead") end
+end
+
 local function QuestDetails(db, id, name)
     local parts = { name }
     local zone = Read(db.Quest, id, "zoneOrSort")
@@ -184,6 +226,10 @@ local function QuestDetails(db, id, name)
         parts[#parts + 1] = ("Requires level %d"):format(requiredLevel)
     end
     local title = (table.concat(parts, "  ·  "):gsub("|", "||"))
+    local catalog, loadCatalog
+    if addon.IsAutomaticSectionEnabled("Next quests") or addon.IsAutomaticSectionEnabled("Previous quests") then
+        catalog, loadCatalog = addon.ReadQuestieIndex(questIndex, db.Quest, AddQuestRecord)
+    end
 
     local function Rows(rewards)
         local rows = {}
@@ -199,13 +245,36 @@ local function QuestDetails(db, id, name)
         end
         AddQuestItems(rows, db, "Required items", required)
         AddQuestItems(rows, db, "Reward items", rewards and rewards[id] or {})
+        AddQuestChains(rows, db.Quest, id, catalog)
         return rows
     end
 
-    local rewards, load = ReadIndex(rewardIndex, db.Item, AddItemRewards)
-    if not load then return Rows(rewards), title end
-    return Rows(), title .. "\nLoading reward items…", function(done)
-        return load(function(index) done(Rows(index), title) end)
+    local rewards, loadRewards = addon.ReadQuestieIndex(rewardIndex, db.Item, AddItemRewards)
+    if not loadRewards and not loadCatalog then return Rows(rewards), title end
+    local loading = (loadRewards and loadCatalog and "Loading quest details…")
+        or (loadRewards and "Loading reward items…") or "Loading quest chain…"
+    return Rows(rewards), title .. "\n" .. loading, function(done)
+        local waitingForRewards, waitingForCatalog = loadRewards ~= nil, loadCatalog ~= nil
+        local cancelRewards, cancelCatalog
+        local function Finish()
+            if not waitingForRewards and not waitingForCatalog then done(Rows(rewards), title) end
+        end
+        if loadRewards then
+            cancelRewards = loadRewards(function(index)
+                rewards, waitingForRewards = index, false
+                Finish()
+            end)
+        end
+        if loadCatalog then
+            cancelCatalog = loadCatalog(function(index)
+                catalog, waitingForCatalog = index, false
+                Finish()
+            end)
+        end
+        return function()
+            if cancelRewards then cancelRewards() end
+            if cancelCatalog then cancelCatalog() end
+        end
     end
 end
 
@@ -214,13 +283,13 @@ function addon.FindQuestTitles(query)
     local quests = db and db.Quest
     if not quests or not quests.Get or not quests.GetAllIds then return {} end
     query = query:gsub("%s+", " ")
-    local index, load = ReadIndex(titleIndex, quests, AddQuestTitle)
+    local index, load = addon.ReadQuestieIndex(questIndex, quests, AddQuestRecord)
     if not load then
-        local matches = addon.FindNamedEntries(index, query)
+        local matches = addon.FindNamedEntries(index.titles or {}, query)
         return matches
     end
     return {}, function(done)
-        return load(function(entries) done(addon.FindNamedEntries(entries, query)) end)
+        return load(function(catalog) done(addon.FindNamedEntries(catalog.titles or {}, query)) end)
     end
 end
 

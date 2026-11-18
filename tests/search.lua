@@ -36,6 +36,16 @@ end
 assert(section("herb", "Gathering") and section("herb", "Gathering")[1].id == 2447,
     "herb should list gathering nodes alongside items")
 assert(section("herb", "Items")[1].id == 5 and section("herb", "Recipes")[1].id == 502)
+QuickItemSearchSettings = { hiddenSections = { Recipes = true, Gathering = true, Spells = true } }
+assert(not section("herb", "Recipes"), "Hidden recipes should stay out of regular searches")
+assert(not section("herb", "Gathering") and addon.Search("herb")[1].id == 5)
+assert(not section("thorns", "Spells"))
+assert(addon.Search("craft spell thread")[1].id == 500, "A direct recipe search should still find recipes")
+assert(addon.Search("@spell thorns")[1].id == 467)
+QuickItemSearchSettings.hiddenSections.Recipes = nil
+assert(section("herb", "Recipes")[1].id == 502, "Hiding Gathering should preserve related recipes")
+QuickItemSearchSettings = nil
+
 assert(section("gather herb", "Items")[1].id == 5)
 assert(section("thorns", "Spells")[1].id == 467)
 assert(section("wave", "Items")[1].id == 6 and section("wave", "Emotes")[1].token == "WAVE")

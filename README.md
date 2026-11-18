@@ -12,7 +12,15 @@ With AtlasLoot Classic Forever enabled, search for a boss by name to see its loo
 
 Target an NPC and type `@target` or `@t` to see its indexed drops from AtlasLoot and QuestieDB. The results update when you switch targets while that query is open.
 
+With QuestieDB enabled, regular name searches can include an **NPCs and Mobs** section. Use `@npc hogger` or `@mob hogger` to search only creatures, then select a match to see its known zones and spawn coordinates. Use `@npc 448` to open a known NPC ID directly. You can hide the automatic section in the search window's cog menu or the addon's WoW settings and still use both shortcuts.
+
+NPC details include a **Loot** section when QuestieDB, AtlasLoot, or Forever Dungeon Journal has indexed drops. Hover an item for its tooltip or click it to inspect. The **NPC Loot** option in either settings menu controls this section.
+
+The **Sells** section lists items QuestieDB associates with that vendor. Hover or click these items to inspect them, and use the **Vendor Items** option in either settings menu to show or hide the section. Check the in-game merchant window for prices and current stock.
+
 With QuestieDB enabled, a plain search like `pie` includes matching names under **Quests**. Use `@quest` or `@q` to search only quest names, or use `@quest 86` to open a quest directly. Select a quest to see its zone, start and turn-in contacts, objectives, and indexed item rewards. Hover or click the required and reward items to inspect them. Right-click any required item in the search results to open one of the quests that uses it. Quests in your log also show live objective progress when the game provides it.
+
+Select a quest under **Previous quests** or **Next quests** to open its details. Both lists show the closest links first, with labels for how many steps each quest is from the one you're viewing. You can show or hide either list in the search options.
 
 Search for a partial name or abbreviation like `zul farrak`, `zf`, or `brd` and click a match under **Dungeons** to open its loot view. Use `@dungeon`, `@instance`, `@d`, `@dung`, or `@inst` to go straight to loot from AtlasLoot and Forever Dungeon Journal. These shortcuts accept the same names and abbreviations. `dm` includes both Deadmines and Dire Maul. Omit the name after a shortcut to look up your current dungeon or raid. Drops are grouped by boss, with a separate Trash section when available. The summary shows the instance level range and boss headings show levels when known. Results show rare-or-better items and uncommon-or-better recipes.
 
