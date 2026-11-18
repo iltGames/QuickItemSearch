@@ -13,7 +13,9 @@ local ARROW_REPEAT_START = 0.16
 local ARROW_REPEAT_MIN = 0.045
 local ARROW_REPEAT_ACCELERATION = 0.84
 local ARROW_DIRECTION = { UP = -1, DOWN = 1 }
-local HISTORY_LIMIT = 10
+local HISTORY_LIMITS = { 0, 5, 10, 20, 50 }
+local DEFAULT_HISTORY_LIMIT = 10
+local HISTORY_PAGE_SIZE = 10
 local QUEST_MENU_PAGE_SIZE = 8
 local MAX_QUERY_BYTES = 512
 local queryExamples = {
@@ -68,8 +70,41 @@ local hoveredRow
 local hoverAwaitingData
 local hoverRefresh
 local moving
+local compactOptions, refreshCompactOptions, refreshAddOnOptions
+
+local function GetSettings()
+    local settings = _G[settingsKey]
+    if type(settings) ~= "table" then
+        settings = {}
+        _G[settingsKey] = settings
+    end
+    return settings
+end
+
+local function QuestRewardLinksEnabled()
+    return GetSettings().questRewardLinks ~= false
+end
+
+local function GetHistoryLimit()
+    local limit = GetSettings().historyLimit
+    for _, allowed in ipairs(HISTORY_LIMITS) do
+        if limit == allowed then return limit end
+    end
+    return DEFAULT_HISTORY_LIMIT
+end
+
+local function GetHistory(settings)
+    if type(settings.history) ~= "table" then settings.history = {} end
+    return settings.history
+end
+
+local function TrimHistory(entries, limit)
+    for index = #entries, limit + 1, -1 do entries[index] = nil end
+end
 
 local function RememberQuery(query)
+    local limit = GetHistoryLimit()
+    if limit == 0 then return end
     query = query:match("^%s*(.-)%s*$")
     if query == "" then return end
     for index, previous in ipairs(history) do
@@ -79,7 +114,7 @@ local function RememberQuery(query)
         end
     end
     table.insert(history, 1, query)
-    history[HISTORY_LIMIT + 1] = nil
+    TrimHistory(history, limit)
 end
 
 local function ReadItem(id)
@@ -131,7 +166,7 @@ local function UpdateRow(row)
         icon = "Interface\\ChatFrame\\UI-ChatIcon-Chat-Up"
     elseif entry.kind == "quest" then
         icon = "Interface\\GossipFrame\\AvailableQuestIcon"
-    elseif entry.kind == "dungeon" then
+    elseif entry.kind == "dungeon" or entry.kind == "npc" then
         icon = "Interface\\Icons\\INV_Misc_Map_01"
     elseif entry.kind == "spell" then
         icon = C_Spell.GetSpellTexture(entry.id)
@@ -233,7 +268,8 @@ local function ShowHover(row)
     local entry = row.entry
     if not entry or entry.sectionHeader or entry.toggleSection then return end
     GameTooltip:SetOwner(row, "ANCHOR_RIGHT")
-    if entry.kind == "text" or entry.kind == "emote" or entry.kind == "quest" or entry.kind == "dungeon" then
+    if entry.kind == "text" or entry.kind == "emote" or entry.kind == "quest"
+        or entry.kind == "dungeon" or entry.kind == "npc" then
         GameTooltip:AddLine((entry.name:gsub("|", "||")), 1, 1, 1, true)
         if entry.kind == "emote" then
             GameTooltip:AddLine("Click to perform this emote.", 0.8, 0.8, 0.8)
@@ -241,6 +277,8 @@ local function ShowHover(row)
             GameTooltip:AddLine("Click to view quest details.", 0.8, 0.8, 0.8)
         elseif entry.kind == "dungeon" then
             GameTooltip:AddLine("Click to view dungeon loot.", 0.8, 0.8, 0.8)
+        elseif entry.kind == "npc" then
+            GameTooltip:AddLine("Click to view known locations.", 0.8, 0.8, 0.8)
         elseif entry.tameSources then
             GameTooltip:AddLine(("Requires pet level %d to train."):format(entry.petTrainingLevel), 0.8, 0.8, 0.8)
             local instructions = #entry.tameSources > 0 and "Tame one of these beasts and have it use the ability."
@@ -275,9 +313,11 @@ local function ShowHover(row)
         GameTooltip:AddLine((label:gsub("|", "||")))
         GameTooltip:AddLine("Click to request item details.", 0.8, 0.8, 0.8, true)
     end
-    local hasQuest = addon.AppendItemSources(GameTooltip, entry.id)
+    local hasRequirement, hasReward = addon.AppendItemSources(GameTooltip, entry.id)
     AppendCraftingSkills(GameTooltip, entry.id)
-    if hasQuest then GameTooltip:AddLine("Right-click to open a quest.", 0.8, 0.8, 0.8, true) end
+    if hasRequirement or (hasReward and QuestRewardLinksEnabled()) then
+        GameTooltip:AddLine("Right-click to open a quest.", 0.8, 0.8, 0.8, true)
+    end
     GameTooltip:Show()
 end
 
@@ -481,11 +521,14 @@ local function SelectResult(entry)
         return
     end
     if entry.kind == "text" then return end
+    searchBox:ClearFocus()
     RememberQuery(searchBox:GetText())
-    if entry.kind == "quest" or entry.kind == "dungeon" then
-        searchBox:SetText(entry.kind == "quest" and ("@quest " .. id) or ("@dungeon " .. entry.name))
+    if entry.kind == "quest" or entry.kind == "dungeon" or entry.kind == "npc" then
+        local continueKeyboardNavigation = resultKeyboardActive
+        local target = entry.kind == "dungeon" and entry.name or id
+        searchBox:SetText("@" .. entry.kind .. " " .. target)
         SearchNow()
-        searchBox:SetFocus()
+        if continueKeyboardNavigation then searchBox:SetFocus() end
         return
     end
     if entry.kind == "emote" then
@@ -726,7 +769,9 @@ local function CreateQueryPopup()
     queryPopup:SetBackdrop(frame:GetBackdrop())
     queryPopup:SetBackdropColor(unpack(COLORS.panel))
     queryPopup:SetBackdropBorderColor(unpack(COLORS.border))
-    queryPopup:SetScript("OnHide", function(self) self.questItem = nil end)
+    queryPopup:SetScript("OnHide", function(self)
+        self.questItem, self.showingHistory = nil, nil
+    end)
     queryPopup:Hide()
 
     local empty = queryPopup:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
@@ -789,7 +834,7 @@ local function CreateQueryPopup()
 
     local buttons = {}
     queryPopup.buttons = buttons
-    for index = 1, math.max(HISTORY_LIMIT, #queryExamples, QUEST_MENU_PAGE_SIZE + 2) do
+    for index = 1, math.max(HISTORY_PAGE_SIZE + 2, #queryExamples, QUEST_MENU_PAGE_SIZE + 2) do
         local button = CreateFrame("Button", nil, queryPopup)
         button:SetHeight(rowHeight)
         local highlight = button:CreateTexture(nil, "HIGHLIGHT")
@@ -811,8 +856,8 @@ local function CreateQueryPopup()
             RememberQuery(query)
             searchBox:SetText(query)
             SearchNow()
-            searchBox:SetFocus()
             searchBox:SetCursorPosition(#query)
+            searchBox:ClearFocus()
         end)
         buttons[index] = button
     end
@@ -824,20 +869,23 @@ local function CreateQueryPopup()
         end
         HideHover()
         local displayed = choices
-        local heading = "Only showing the last " .. HISTORY_LIMIT .. " searches"
-        if questMenu then
-            heading = "Open quest"
+        local isHistory = choices == history
+        local historyOff = isHistory and GetHistoryLimit() == 0
+        local heading = questMenu and "Open quest" or "Recent searches"
+        local pageSize = questMenu and QUEST_MENU_PAGE_SIZE or HISTORY_PAGE_SIZE
+        if (questMenu or isHistory) and #choices > pageSize then
+            local units = questMenu and "quests" or "searches"
             local first = pageStart or 1
-            local last = math.min(#choices, first + QUEST_MENU_PAGE_SIZE - 1)
+            local last = math.min(#choices, first + pageSize - 1)
             displayed = {}
             if first > 1 then
-                displayed[#displayed + 1] = { name = "Previous quests", page = first - QUEST_MENU_PAGE_SIZE }
+                displayed[#displayed + 1] = { name = "Previous " .. units, page = first - pageSize }
             end
             for i = first, last do displayed[#displayed + 1] = choices[i] end
-            if last < #choices then displayed[#displayed + 1] = { name = "Next quests", page = last + 1 } end
-            if #choices > QUEST_MENU_PAGE_SIZE then
-                heading = ("%s · %d–%d of %d"):format(heading, first, last, #choices)
+            if last < #choices then
+                displayed[#displayed + 1] = { name = "Next " .. units, page = last + 1 }
             end
+            heading = ("%s · %d–%d of %d"):format(heading, first, last, #choices)
         end
         local showFields = choices == queryExamples
         fields:SetShown(showFields)
@@ -849,15 +897,15 @@ local function CreateQueryPopup()
         for index, row in ipairs(buttons) do
             row:UnlockHighlight()
             local choice = displayed[index]
-            local page = choice and questMenu and choice.page
-            row.changePage = page and function() ShowChoices(owner, choices, true, page) end or nil
+            local page = type(choice) == "table" and choice.page
+            row.changePage = page and function() ShowChoices(owner, choices, questMenu, page) end or nil
             row.query = nil
             if choice then
                 local top = -5 - fieldsOffset - (index - 1) * rowHeight
                 row:ClearAllPoints()
                 row:SetPoint("TOPLEFT", 5, top)
                 row:SetPoint("TOPRIGHT", -5, top)
-                local display = questMenu and choice.name or (choice:match("|H.-|h(.-)|h") or choice)
+                local display = type(choice) == "table" and choice.name or (choice:match("|H.-|h(.-)|h") or choice)
                 row.label:SetText((display:gsub("|", "||")))
                 if not page then row.query = questMenu and ("@quest " .. choice.id) or choice end
             end
@@ -865,10 +913,12 @@ local function CreateQueryPopup()
         end
         empty:ClearAllPoints()
         empty:SetPoint("TOPLEFT", 12, -13 - fieldsOffset)
+        empty:SetText(historyOff and "Search history is off" or "No recent searches")
         empty:SetShown(#displayed == 0)
         queryPopup:SetHeight(10 + fieldsOffset + math.max(1, #displayed) * rowHeight)
         queryPopup.anchor = owner
         queryPopup.questItem = questMenu and owner.entry or nil
+        queryPopup.showingHistory = isHistory
         queryPopup:ClearAllPoints()
         if questMenu then
             queryPopup:SetPoint("TOPLEFT", owner, "TOPRIGHT", 5, 0)
@@ -876,7 +926,7 @@ local function CreateQueryPopup()
             queryPopup:SetPoint("TOPRIGHT", owner, "BOTTOMRIGHT", 0, -5)
         end
         queryPopup:Show()
-        searchBox:SetFocus()
+        if questMenu then searchBox:ClearFocus() else searchBox:SetFocus() end
     end
     function queryPopup.ShowQuests(owner, quests) ShowChoices(owner, quests, true) end
 
@@ -893,8 +943,8 @@ local function CreateQueryPopup()
         end)
     end
 
-    AddPopupButton("History", "Interface\\Icons\\INV_Misc_PocketWatch_01", -76, history)
-    AddPopupButton("Examples", "Interface\\Icons\\INV_Misc_Book_09", -46, queryExamples)
+    AddPopupButton("History", "Interface\\Icons\\INV_Misc_PocketWatch_01", -40, history)
+    AddPopupButton("Examples", "Interface\\Icons\\INV_Misc_Book_09", -11, queryExamples)
 end
 
 local function OnResultKeyDown(self, key)
@@ -927,67 +977,153 @@ local function OnResultKeyUp(_, key)
     end
 end
 
-local function CreateWindow()
-    local settings = _G[settingsKey]
-    if type(settings) ~= "table" then
-        settings = {}
-        _G[settingsKey] = settings
+local function RefreshSearchPreferences()
+    if refreshCompactOptions then refreshCompactOptions() end
+    if refreshAddOnOptions then refreshAddOnOptions() end
+end
+
+local function CreateSearchPreferences(panel, anchor, margin)
+    local historyLabel = panel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+    historyLabel:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, -margin)
+    historyLabel:SetText("Search history length")
+
+    local limitButtons = {}
+    local previous
+    for _, limit in ipairs(HISTORY_LIMITS) do
+        local button = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+        button:SetSize(42, 22)
+        if previous then
+            button:SetPoint("LEFT", previous, "RIGHT", 4, 0)
+        else
+            button:SetPoint("TOPLEFT", historyLabel, "BOTTOMLEFT", 0, -6)
+        end
+        button:SetText(limit == 0 and "Off" or tostring(limit))
+        button:SetScript("OnClick", function()
+            local settings = GetSettings()
+            settings.historyLimit = limit
+            TrimHistory(GetHistory(settings), limit)
+            if queryPopup and queryPopup.showingHistory then queryPopup:Hide() end
+            RefreshSearchPreferences()
+        end)
+        limitButtons[limit], previous = button, button
     end
-    if type(settings.history) ~= "table" then settings.history = {} end
-    history = settings.history
-    local savedRows = tonumber(settings.rows)
-    visibleRows = savedRows and Clamp(math.floor(savedRows), MIN_ROWS, MAX_ROWS) or DEFAULT_ROWS
-    local width = Clamp(tonumber(settings.width) or DEFAULT_WIDTH, MIN_WIDTH,
-        math.max(MIN_WIDTH, math.min(MAX_WIDTH, UIParent:GetWidth())))
-    frame = CreateFrame("Frame", "QuickItemSearchFrame", UIParent, "BackdropTemplate")
-    frame:SetSize(width, RESULTS_TOP + FOOTER_HEIGHT)
-    frame:SetPoint("TOP", UIParent, "TOP", tonumber(settings.x) or 0, tonumber(settings.y) or -130)
-    frame:SetFrameStrata("DIALOG")
-    frame:SetMovable(true)
-    frame:SetClampedToScreen(true)
-    frame:EnableMouse(true)
-    frame:EnableMouseWheel(true)
-    frame:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8X8",
-        edgeFile = "Interface\\Buttons\\WHITE8X8",
-        edgeSize = 1,
-    })
-    frame:SetBackdropColor(unpack(COLORS.panel))
-    frame:SetBackdropBorderColor(unpack(COLORS.border))
-    frame:SetScript("OnMouseWheel", OnMouseWheel)
-    tinsert(UISpecialFrames, frame:GetName())
 
-    local header = frame:CreateTexture(nil, "BACKGROUND", nil, 1)
-    header:SetColorTexture(unpack(COLORS.inset))
-    header:SetPoint("TOPLEFT", 1, -1)
-    header:SetPoint("TOPRIGHT", -1, -1)
-    header:SetHeight(52)
+    local sectionsLabel = panel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+    sectionsLabel:SetPoint("TOPLEFT", limitButtons[0], "BOTTOMLEFT", 0, -12)
+    sectionsLabel:SetText("Automatic result sections")
 
-    local divider = frame:CreateTexture(nil, "ARTWORK")
-    divider:SetColorTexture(unpack(COLORS.trim))
-    divider:SetHeight(1)
-    divider:SetPoint("TOPLEFT", 8, -53)
-    divider:SetPoint("TOPRIGHT", -8, -53)
+    local checks = {}
+    for index, section in ipairs(addon.automaticSections) do
+        local check = CreateFrame("CheckButton", nil, panel, "UICheckButtonTemplate")
+        check:SetSize(24, 24)
+        local column, row = (index - 1) % 2, math.floor((index - 1) / 2)
+        check:SetPoint("TOPLEFT", sectionsLabel, "BOTTOMLEFT", column * 122, -4 - row * 24)
+        local label = check:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+        label:SetPoint("LEFT", check, "RIGHT", 1, 0)
+        label:SetText(section)
+        check:SetHitRectInsets(0, -label:GetStringWidth() - 1, 0, 0)
+        check:SetScript("OnClick", function(self)
+            local settings = GetSettings()
+            if type(settings.hiddenSections) ~= "table" then settings.hiddenSections = {} end
+            settings.hiddenSections[section] = not self:GetChecked() or nil
+            RefreshSearchPreferences()
+            if frame and frame:IsShown() then SearchNow() end
+        end)
+        checks[section] = check
+    end
 
+    local rewardLinks = CreateFrame("CheckButton", nil, panel, "UICheckButtonTemplate")
+    rewardLinks:SetSize(24, 24)
+    rewardLinks:SetPoint("TOPLEFT", sectionsLabel, "BOTTOMLEFT", 0, -10 - math.ceil(#addon.automaticSections / 2) * 24)
+    local rewardLabel = rewardLinks:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+    rewardLabel:SetPoint("LEFT", rewardLinks, "RIGHT", 1, 0)
+    rewardLabel:SetText("Quest reward links")
+    rewardLinks:SetHitRectInsets(0, -rewardLabel:GetStringWidth() - 1, 0, 0)
+    rewardLinks:SetScript("OnClick", function(self)
+        GetSettings().questRewardLinks = not not self:GetChecked()
+        if queryPopup and queryPopup.questItem then queryPopup:Hide() end
+        RefreshSearchPreferences()
+    end)
+
+    local function Refresh()
+        local current = GetHistoryLimit()
+        for limit, button in pairs(limitButtons) do button:SetEnabled(limit ~= current) end
+        for section, check in pairs(checks) do check:SetChecked(addon.IsAutomaticSectionEnabled(section)) end
+        rewardLinks:SetChecked(QuestRewardLinksEnabled())
+    end
+    panel:HookScript("OnShow", Refresh)
+    return Refresh
+end
+
+local function CreateCompactOptions()
+    local width = 272
+    local panel = CreateFrame("Frame", "QuickItemSearchOptionsFrame", frame, "BackdropTemplate")
+    panel:SetSize(width, 154 + math.ceil(#addon.automaticSections / 2) * 24)
+    panel:SetFrameStrata("DIALOG")
+    panel:SetFrameLevel(frame:GetFrameLevel() + 5)
+    panel:SetClampedToScreen(true)
+    panel:EnableMouse(true)
+    panel:SetBackdrop(frame:GetBackdrop())
+    panel:SetBackdropColor(unpack(COLORS.panel))
+    panel:SetBackdropBorderColor(unpack(COLORS.border))
+    panel:Hide()
+
+    local title = panel:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
+    title:SetPoint("TOPLEFT", 14, -12)
+    title:SetText("Options")
+    local close = CreateFrame("Button", nil, panel, "UIPanelCloseButton")
+    close:SetSize(24, 24)
+    close:SetPoint("TOPRIGHT", -5, -5)
+    close:SetScript("OnClick", function() panel:Hide() end)
+    refreshCompactOptions = CreateSearchPreferences(panel, title, 11)
+
+    local button = CreateFrame("Button", nil, frame)
+    button:SetSize(16, 16)
+    button:SetPoint("TOPRIGHT", -13, 7)
+    button:SetNormalTexture("Interface\\Buttons\\UI-OptionsButton")
+    button:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
+    SetButtonTooltip(button, "Options")
+    button:SetScript("OnClick", function(self)
+        HideButtonTooltip(self)
+        if panel:IsShown() then
+            panel:Hide()
+            return
+        end
+        queryPopup:Hide()
+        HideHover()
+        local rightSpace = UIParent:GetWidth() - frame:GetRight()
+        panel:ClearAllPoints()
+        if rightSpace < width + 6 and frame:GetLeft() > rightSpace then
+            panel:SetPoint("TOPRIGHT", frame, "TOPLEFT", -6, 0)
+        else
+            panel:SetPoint("TOPLEFT", frame, "TOPRIGHT", 6, 0)
+        end
+        panel:Show()
+    end)
+    return panel
+end
+
+local function CreateSearchControls()
     searchBox = CreateFrame("EditBox", nil, frame, "SearchBoxTemplate")
     searchBox:SetHeight(34)
     searchBox:SetPoint("TOPLEFT", 24, -13)
-    searchBox:SetPoint("TOPRIGHT", -106, -13)
+    searchBox:SetPoint("TOPRIGHT", -72, -13)
     searchBox:SetFontObject("GameFontHighlightLarge")
     searchBox:SetTextColor(unpack(COLORS.text))
     searchBox:SetAltArrowKeyMode(false)
     searchBox:SetAutoFocus(false)
     searchBox:SetMaxBytes(MAX_QUERY_BYTES)
-    searchBox.Instructions:SetText("Search items, quests, and dungeons")
+    searchBox.Instructions:SetText("Search items, quests, NPCs, and dungeons")
     searchBox.Instructions:SetTextColor(unpack(COLORS.mutedText))
     for _, key in ipairs({ "Left", "Middle", "Right" }) do
         local piece = searchBox[key]
         if piece then piece:SetVertexColor(0.77, 0.69, 0.54) end
     end
     CreateQueryPopup()
+    compactOptions = CreateCompactOptions()
     local closeButton = CreateFrame("Button", "QuickItemSearchCloseButton", frame, "UIPanelCloseButton")
-    closeButton:SetSize(24, 24)
-    closeButton:SetPoint("TOPRIGHT", -16, -18)
+    closeButton:SetSize(16, 16)
+    closeButton:SetPoint("TOPRIGHT", 6, 7)
     closeButton:SetScript("OnClick", function() frame:Hide() end)
     searchBox:HookScript("OnTextChanged", function()
         queryPopup:Hide()
@@ -1038,6 +1174,47 @@ local function CreateWindow()
         if queryPopup:IsShown() then queryPopup:Hide()
         else frame:Hide() end
     end)
+end
+
+local function CreateWindow()
+    local settings = GetSettings()
+    history = GetHistory(settings)
+    TrimHistory(history, GetHistoryLimit())
+    local savedRows = tonumber(settings.rows)
+    visibleRows = savedRows and Clamp(math.floor(savedRows), MIN_ROWS, MAX_ROWS) or DEFAULT_ROWS
+    local width = Clamp(tonumber(settings.width) or DEFAULT_WIDTH, MIN_WIDTH,
+        math.max(MIN_WIDTH, math.min(MAX_WIDTH, UIParent:GetWidth())))
+    frame = CreateFrame("Frame", "QuickItemSearchFrame", UIParent, "BackdropTemplate")
+    frame:SetSize(width, RESULTS_TOP + FOOTER_HEIGHT)
+    frame:SetPoint("TOP", UIParent, "TOP", tonumber(settings.x) or 0, tonumber(settings.y) or -130)
+    frame:SetFrameStrata("DIALOG")
+    frame:SetMovable(true)
+    frame:SetClampedToScreen(true)
+    frame:EnableMouse(true)
+    frame:EnableMouseWheel(true)
+    frame:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8X8",
+        edgeFile = "Interface\\Buttons\\WHITE8X8",
+        edgeSize = 1,
+    })
+    frame:SetBackdropColor(unpack(COLORS.panel))
+    frame:SetBackdropBorderColor(unpack(COLORS.border))
+    frame:SetScript("OnMouseWheel", OnMouseWheel)
+    tinsert(UISpecialFrames, frame:GetName())
+
+    local header = frame:CreateTexture(nil, "BACKGROUND", nil, 1)
+    header:SetColorTexture(unpack(COLORS.inset))
+    header:SetPoint("TOPLEFT", 1, -1)
+    header:SetPoint("TOPRIGHT", -1, -1)
+    header:SetHeight(52)
+
+    local divider = frame:CreateTexture(nil, "ARTWORK")
+    divider:SetColorTexture(unpack(COLORS.trim))
+    divider:SetHeight(1)
+    divider:SetPoint("TOPLEFT", 8, -53)
+    divider:SetPoint("TOPRIGHT", -8, -53)
+
+    CreateSearchControls()
 
     for index = 1, MAX_ROWS do
         local row = CreateFrame("Button", nil, frame)
@@ -1086,7 +1263,7 @@ local function CreateWindow()
             if not self.entry or self.entry.sectionHeader then return end
             if button == "RightButton" then
                 if not self.entry.kind then
-                    local quests = addon.GetItemQuestRequirements(self.entry.id)
+                    local quests = addon.GetItemQuestChoices(self.entry.id, QuestRewardLinksEnabled())
                     if #quests > 0 then queryPopup.ShowQuests(self, quests) else queryPopup:Hide() end
                 end
                 return
@@ -1125,7 +1302,7 @@ local function CreateWindow()
     keyboardHint:SetTextColor(unpack(COLORS.mutedText))
     local dragHandle = CreateFrame("Frame", nil, frame)
     dragHandle:SetPoint("TOPLEFT", 8, -1)
-    dragHandle:SetPoint("TOPRIGHT", -8, -1)
+    dragHandle:SetPoint("TOPRIGHT", -72, -1)
     dragHandle:SetHeight(12)
     dragHandle:EnableMouse(true)
     dragHandle:RegisterForDrag("LeftButton")
@@ -1199,6 +1376,7 @@ local function CreateWindow()
     end)
     frame:SetScript("OnHide", function()
         queryPopup:Hide()
+        compactOptions:Hide()
         RememberQuery(searchBox:GetText())
         StopResizingWindow()
         ReleaseResultKeyboard()
@@ -1311,6 +1489,7 @@ local function CreateLevelOptions(panel, anchor)
         above:SetText(tostring(savedAbove))
         status:SetText("")
     end)
+    return save
 end
 
 local function CreateOptions()
@@ -1411,7 +1590,8 @@ local function CreateOptions()
             Refresh()
         end
     end)
-    if addon.GetLevelWindow then CreateLevelOptions(panel, status) end
+    local anchor = addon.GetLevelWindow and CreateLevelOptions(panel, status) or status
+    refreshAddOnOptions = CreateSearchPreferences(panel, anchor, 22)
     local category = Settings.RegisterCanvasLayoutCategory(panel, title)
     Settings.RegisterAddOnCategory(category)
 end
