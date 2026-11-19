@@ -16,11 +16,19 @@ const professions = {
     Leatherworking: "Leatherworking",
     Tailoring: "Tailoring",
 };
+// Crafting Path marks these recipes as gone. Keep their client skill-up
+// thresholds without inferring a learning requirement from the colors.
+const firstAidWithUnconfirmedSources = new Set([
+    10841, // Heavy Mageweave Bandage
+    18629, // Runecloth Bandage
+    18630, // Heavy Runecloth Bandage
+]);
 const rows = [];
 for (const [file, profession] of Object.entries(professions)) {
     const data = fs.readFileSync(path.join(recipeDirectory, file + ".lua"), "utf8");
     for (const [, id, name, fields] of data.matchAll(/^\s*\[(\d+)\] = \{ name = ("(?:[^"\\]|\\.)*"),([^\r\n]*)/gm)) {
-        if (/\bgone = true\b/.test(fields)) continue;
+        const includeUnconfirmed = file === "FirstAid" && firstAidWithUnconfirmedSources.has(Number(id));
+        if (!includeUnconfirmed && /\bgone = true\b/.test(fields)) continue;
         const skill = fields.match(/\btrain = (\d+)/)?.[1] ?? (/\bbasic = true\b/.test(fields) ? "1" : "false");
         const output = fields.match(/\bout = \{\s*(\d+),/)?.[1];
         const reagents = fields.match(/\br = \{((?:\s*\{\s*\d+\s*,\s*\d+\s*\}\s*,?)*\s*)\}/)?.[1];
@@ -29,8 +37,10 @@ for (const [file, profession] of Object.entries(professions)) {
         const colors = fields.match(/\bt = \{\s*(\d+),\s*(\d+),\s*(\d+),\s*(\d+)\s*\}/);
         if (!colors) throw new Error(`Missing skill thresholds for recipe ${id}.`);
         const [, orange, yellow, green, gray] = colors;
-        const learn = skill === "false" && orange !== "1" ? orange : skill;
-        rows.push(`    { ${id}, ${name}, "${profession}", ${learn}, ${output || "false"}, { ${reagentIDs.join(", ")} }, { ${learn}, ${yellow}, ${green}, ${gray} } },`);
+        const learn = !includeUnconfirmed && skill === "false" && orange !== "1" ? orange : skill;
+        const orangeThreshold = includeUnconfirmed ? orange : learn;
+        const trainingSource = includeUnconfirmed ? ", classicArtisanFirstAid = true" : "";
+        rows.push(`    { ${id}, ${name}, "${profession}", ${learn}, ${output || "false"}, { ${reagentIDs.join(", ")} }, { ${orangeThreshold}, ${yellow}, ${green}, ${gray} }${trainingSource} },`);
     }
 }
 

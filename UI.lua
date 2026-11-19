@@ -334,6 +334,7 @@ local function ShowHover(row)
         elseif addon.AppendSpellUnlockSources then
             addon.AppendSpellUnlockSources(GameTooltip, entry)
         end
+        if entry.trainingNote then GameTooltip:AddLine(entry.trainingNote, 0.8, 0.8, 0.8, true) end
         GameTooltip:Show()
         return
     end
@@ -345,7 +346,11 @@ local function ShowHover(row)
     end
     local sources = addon.GetItemSources(entry.id)
     local nodes = addon.GetGatheringNodes and addon.GetGatheringNodes(entry.id)
-    local hasRelated = entry.questReward or ItemRecipes(entry.id)
+    local recipes = ItemRecipes(entry.id)
+    if recipes and #recipes == 1 and recipes[1].trainingNote then
+        GameTooltip:AddLine(recipes[1].trainingNote, 0.8, 0.8, 0.8, true)
+    end
+    local hasRelated = entry.questReward or recipes
         or (nodes and #nodes > 0)
         or (addon.HasRecipesUsingItem and addon.HasRecipesUsingItem(entry.id))
     if not hasRelated then

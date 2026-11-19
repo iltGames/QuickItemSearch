@@ -1,5 +1,9 @@
 # Quick Item Search
 
+## Change summaries
+
+- After making a change, give the user enough technical detail to review it. For a bug fix, explain the root cause, how it produced the reported behavior, and how the fix addresses it. For other changes, explain how the implementation works. Reference the relevant files or functions, describe how you verified the change, and call out anything still unverified.
+
 ## Options
 
 - When adding a result section or user-facing feature, add an on/off toggle for it in the same change. Expose the toggle in both the search window's cog menu and WoW's AddOns settings by reusing the shared controls in `CreateSearchPreferences` in `UI.lua`.

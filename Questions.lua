@@ -498,6 +498,16 @@ local trainingRanks = {
     { name = "Artisan", cap = 300, skill = 200, level = 35 },
 }
 
+function addon.GetClassicArtisanFirstAidNote()
+    local lines = { "In Classic, learn this from your faction's Triage doctor after unlocking Artisan First Aid." }
+    for _, trainer in ipairs(training["first aid"].trainers[#trainingRanks]) do
+        local faction, npc, location = unpack(trainer)
+        lines[#lines + 1] = ("%s: %s in %s"):format(faction, npc, location)
+    end
+    lines[#lines + 1] = "Recipe training is unverified in Forever."
+    return table.concat(lines, "\n")
+end
+
 local function TrainingRows(profession, currentSkill, includeProfession)
     local finalRank = trainingRanks[#trainingRanks]
     if currentSkill and currentSkill > finalRank.cap then

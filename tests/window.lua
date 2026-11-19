@@ -966,10 +966,14 @@ reward.scripts.OnClick(reward, "RightButton")
 ClickQuery("@quest 87")
 assert(searchBox:GetText() == "@quest 87", "Re-enabling links should restore cached reward quests")
 
-addon.index = { [3820] = "Stranglekelp" }
-addon.recipes = { { 501, "Kelp Draught", "Alchemy", 75, false, { 3820 } } }
+addon.index = { [3820] = "Stranglekelp", [14529] = "Runecloth Bandage" }
+addon.recipes = {
+    { 501, "Kelp Draught", "Alchemy", 75, false, { 3820 } },
+    { 18629, "Runecloth Bandage", "First Aid", false, 14529, { 14047 }, { 1, 260, 290, 320 },
+        classicArtisanFirstAid = true },
+}
 C_Item.IsItemDataCachedByID = function(id)
-    assert(id == 3820, "Opening related recipes must keep spell IDs out of the item cache")
+    assert(id == 3820 or id == 14529, "Opening related recipes must keep spell IDs out of the item cache")
     return false
 end
 C_Spell = { GetSpellTexture = Noop }
@@ -978,6 +982,8 @@ assert(loadfile("Questions.lua"))("QuickItemSearch", addon)
 function addon.Search(query)
     if query == "kelp" then return { { id = 3820, name = "Stranglekelp" } } end
     if query == "usedin 3820" then return addon.FindRecipesUsingItems({ { id = 3820 } }) end
+    if query == "runecloth bandage" then return { { id = 14529, name = "Runecloth Bandage" } } end
+    if query == "craft fa" then return addon.SearchRecipes("", "craft", false, "First Aid") end
     return {}
 end
 local reloadToggle = SlashCmdList.QUICKITEMSEARCH
@@ -986,6 +992,14 @@ local kelp = assert(Result(function(entry) return entry.id == 3820 end))
 kelp.scripts.OnClick(kelp, "RightButton")
 ClickQuery("usedin 3820")
 assert(Result(function(entry) return entry.id == 501 end), "The reagent menu must open recipes despite old settings")
+for query, id in pairs({ ["runecloth bandage"] = 14529, ["craft fa"] = 18629 }) do
+    reloadToggle(query)
+    local bandage = assert(Result(function(entry) return entry.id == id end))
+    tooltipLines = {}
+    bandage.scripts.OnEnter(bandage)
+    assert(table.concat(tooltipLines, "\n"):find("Doctor Gregory Victor", 1, true),
+        query .. " should show the trainer note when hovering over Runecloth Bandage")
+end
 
 local placed
 local mobSpawns = { [12] = { { 26.24, 87 }, { 32, 75 } }, [40] = { { 12, 30 } } }

@@ -1,3 +1,8 @@
+## Quick Item Search 0.4.14
+
+- Find Heavy Mageweave Bandage, Runecloth Bandage, and Heavy Runecloth Bandage in item search and `craft fa`. Each recipe shows all four First Aid skill-up thresholds.
+- Hover over a bandage or its recipe for the faction-specific Artisan First Aid route through Triage. The tooltip identifies the Classic route as unverified for recipe training in WoW Forever.
+
 ## Quick Item Search 0.4.13
 
 - Search a profession name such as `First Aid` to see its recipes alongside item and trainer matches. `first aid crafting` also opens a recipe search.

@@ -27,9 +27,10 @@ end
 local function RecipeResult(recipe, rank)
     local id, name, profession, skill = unpack(recipe)
     local label = skill and (profession .. " " .. skill) or (profession .. " (skill unknown)")
+    local trainingNote = recipe.classicArtisanFirstAid and addon.GetClassicArtisanFirstAidNote()
     return {
         id = id, name = name, kind = "spell", key = name:lower(), rank = rank, matchLabel = label, skill = skill,
-        profession = profession, skillThresholds = recipe[7],
+        profession = profession, skillThresholds = recipe[7], trainingNote = trainingNote,
     }
 end
 

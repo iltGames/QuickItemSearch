@@ -603,7 +603,10 @@ assert(table.concat(bundled.GetItemRecipes(2840)[1].skillThresholds, "/") == "1/
 assert(#bundled.GetItemRecipes(18258) == 2)
 for _, recipe in ipairs(bundled.recipes) do
     local thresholds = recipe[7]
-    assert(#thresholds == 4 and thresholds[1] == recipe[4] and thresholds[2] <= thresholds[3]
+    local orange = thresholds[1]
+    local learningSkill = recipe[4]
+    local validOrange = orange == learningSkill or (not learningSkill and type(orange) == "number" and orange <= thresholds[2])
+    assert(#thresholds == 4 and validOrange and thresholds[2] <= thresholds[3]
         and thresholds[3] <= thresholds[4], "Invalid skill thresholds for " .. recipe[2])
 end
 assert(bundled.Search("craft arcanite bar")[1].id == 17187)
@@ -659,6 +662,32 @@ do
     assert(not section("First Aid", "Recipes", bundled))
     assert(section("craft first aid", "Recipes", bundled), "Direct profession recipe search should still work")
     QuickItemSearchSettings = nil
+end
+do
+    local bandages = section("runecloth bandage", "Recipes", bundled)
+    assert(bandages and bandages[1].id == 18629 and bandages[1].profession == "First Aid",
+        "Runecloth Bandage item search should show the First Aid recipe")
+    assert(table.concat(bandages[1].skillThresholds, "/") == "1/260/290/320",
+        "Runecloth Bandage item search should show all four skill-up thresholds")
+
+    local firstAidRecipes = {}
+    for _, row in ipairs(section("craft fa", "Recipes", bundled) or {}) do
+        firstAidRecipes[row.id] = row
+    end
+    local expected = { [10841] = "1/240/270/300", [18629] = "1/260/290/320", [18630] = "1/290/320/350" }
+    for id, thresholds in pairs(expected) do
+        local recipe = firstAidRecipes[id]
+        assert(recipe and table.concat(recipe.skillThresholds, "/") == thresholds and recipe.skill == false,
+            "First Aid crafting search should show skill-up thresholds without a learning requirement for spell " .. id)
+        local trainingNote = recipe.trainingNote
+        assert(trainingNote and trainingNote:find("Triage", 1, true)
+            and trainingNote:find("Alliance: Doctor Gustaf VanHowzen", 1, true)
+            and trainingNote:find("Horde: Doctor Gregory Victor", 1, true)
+            and trainingNote:find("unverified in Forever", 1, true),
+            "Bandage recipes should show the faction-specific Triage trainers and source status")
+    end
+    assert(bundled.GetItemRecipes(14529)[1].trainingNote == firstAidRecipes[18629].trainingNote,
+        "The crafted item should use the same trainer note as the recipe")
 end
 for _, query in ipairs({ "first aid crafting", "crafting fa" }) do
     local rows, _, _, _, sections = bundled.Search(query)
