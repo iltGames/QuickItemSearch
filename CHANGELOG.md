@@ -1,3 +1,7 @@
+## Quick Item Search 0.4.12
+
+- Pressing Enter to open a result's actions menu highlights the first option immediately. Press Enter again to choose it.
+
 ## Quick Item Search 0.4.11
 
 - Use the search cog for history and automatic result filters. Open the full AddOns settings directly from the cog.

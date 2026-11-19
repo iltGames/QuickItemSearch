@@ -592,6 +592,7 @@ local function IsPopupQueryHighlighted(query)
     end
     return false
 end
+assert(IsPopupQueryHighlighted("@quest 86"), "Enter on a selected result should highlight the top menu choice")
 assert(not PressWindowKey("LEFT"), "Left should return from the context menu to the results")
 for _ = 1, 3 do
     assert(not PressWindowKey("LEFT") and window.keyboardEnabled, "Repeated Left should keep the results focused")
@@ -614,6 +615,11 @@ assert(searchBox:GetText() == "@quest pie" and not GetCurrentKeyBoardFocus(),
     "Right should open the context menu directly from keyboard result selection")
 assert(IsPopupQueryHighlighted("@quest 86"), "Right from the search box should highlight the top choice too")
 assert(not PressWindowKey("LEFT"), "Left should close the menu and keep the current search")
+toggle("@quest pie")
+searchBox.scripts.OnArrowPressed(searchBox, "UP")
+searchBox.scripts.OnEnterPressed(searchBox)
+assert(IsPopupQueryHighlighted("@quest 86"), "Enter from the search box should highlight the top menu choice")
+assert(not PressWindowKey("LEFT"), "Left should close the menu opened from the search box")
 local objective = { kind = "text", name = "Collect 4 Chunks of Boar Meat", matchLabel = "1/4" }
 function addon.Search() return { objective } end
 toggle("objective")
