@@ -1182,10 +1182,10 @@ local function CreateQueryPopup()
     AddPopupButton("Examples", "Interface\\Icons\\INV_Misc_Book_09", -11, queryExamples)
 end
 
-local function OpenSelectedMenu(highlightFirst)
+local function OpenSelectedMenu()
     local row = rows[selected - firstVisible + 1]
     if not row or not queryPopup.ShowResultChoices(row) then return false end
-    if highlightFirst then queryPopup.MoveSelection(1) end
+    queryPopup.MoveSelection(1)
     return true
 end
 
@@ -1201,7 +1201,7 @@ local function UseResultArrow(key)
             SelectResult(entry)
         end
     elseif key == "RIGHT" then
-        OpenSelectedMenu(true)
+        OpenSelectedMenu()
     end
 end
 
