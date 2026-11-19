@@ -1,3 +1,9 @@
+## Quick Item Search 0.4.13
+
+- Search a profession name such as `First Aid` to see its recipes alongside item and trainer matches. `first aid crafting` also opens a recipe search.
+- Quest details show the character's XP reward for quests in the quest log and labeled base XP when only QuestieDB data is available.
+- Use the Back arrow or Backspace while navigating results to return to earlier searches. Quest reward items have a right-click action to search for the item.
+
 ## Quick Item Search 0.4.12
 
 - Pressing Enter to open a result's actions menu highlights the first option immediately. Press Enter again to choose it.
