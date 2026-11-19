@@ -165,6 +165,7 @@ local function FindActions(query, exactItem)
         else
             local _, last = query:find('[^%s:"]+', first)
             local word = query:sub(first, last)
+            if word == "crafting" then word = "craft" end
             if word == "used" then
                 local _, length = query:sub(last + 1):find("^ in%f[%W]")
                 if length then word, last = "usedin", last + length end

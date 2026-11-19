@@ -50,10 +50,14 @@ local COLORS = {
 }
 local frame, searchBox, summary, message, range, scrollbar
 local queryPopup, history
+local backButton
+local backQueries = {}
+-- Live previews can change while typing without adding a Back step.
+local navigationQuery = ""
 local keyboardHint, resizeHandle
 local visibleRows = DEFAULT_ROWS
 local resizing, resizePreviewRows
-local arrowSelected, resultKeyboardActive, pressedResultEnter
+local arrowSelected, resultKeyboardActive, heldResultEnter
 local heldArrow, arrowTimer
 local SEARCH_KEYS = "Up / Down   Navigate     Enter   Release Focus     Esc   Close"
 local RESULT_KEYS = "Up / Down   Browse    Enter / Right   Actions    Esc   Close"
@@ -67,6 +71,8 @@ local selected = 1
 local firstVisible = 1
 local syncingScrollbar
 local debounce
+local settingSearchText
+local lastSearchText
 local cancelStatSearch
 local pending
 local hoveredRow
@@ -87,6 +93,31 @@ end
 
 local function QuestRewardLinksEnabled()
     return GetSettings().questRewardLinks ~= false
+end
+
+local function CanGoBack()
+    return #backQueries > 0
+        or (navigationQuery ~= (searchBox:GetText() or "") and navigationQuery:find("%S") ~= nil)
+end
+
+local function UpdateBackButton()
+    if not backButton then return end
+    backButton:SetEnabled(CanGoBack())
+end
+
+local function TrackSearchQuery(query)
+    if query == navigationQuery then return end
+    if navigationQuery:find("%S") then
+        backQueries[#backQueries + 1] = navigationQuery
+    elseif backQueries[#backQueries] == query then
+        table.remove(backQueries)
+    end
+    navigationQuery = query
+end
+
+local function CommitTypedQuery()
+    TrackSearchQuery(searchBox:GetText() or "")
+    UpdateBackButton()
 end
 
 local function GetHistoryLimit()
@@ -314,7 +345,8 @@ local function ShowHover(row)
     end
     local sources = addon.GetItemSources(entry.id)
     local nodes = addon.GetGatheringNodes and addon.GetGatheringNodes(entry.id)
-    local hasRelated = ItemRecipes(entry.id) or (nodes and #nodes > 0)
+    local hasRelated = entry.questReward or ItemRecipes(entry.id)
+        or (nodes and #nodes > 0)
         or (addon.HasRecipesUsingItem and addon.HasRecipesUsingItem(entry.id))
     if not hasRelated then
         for _, source in ipairs(sources) do
@@ -380,8 +412,12 @@ local function StopArrowRepeat()
     heldArrow, arrowTimer = nil, nil
 end
 
-local function ReleaseResultKeyboard()
+local function ResetResultKeys()
     StopArrowRepeat()
+    arrowSelected = nil
+end
+
+local function ReleaseResultKeyboard()
     if resultKeyboardActive then
         frame:SetScript("OnKeyDown", nil)
         frame:SetScript("OnKeyUp", nil)
@@ -390,7 +426,8 @@ local function ReleaseResultKeyboard()
     if resultKeyboardActive or arrowSelected then
         keyboardHint:SetText(SEARCH_KEYS)
     end
-    arrowSelected, resultKeyboardActive, pressedResultEnter = nil, nil, nil
+    ResetResultKeys()
+    resultKeyboardActive, heldResultEnter = nil, nil
 end
 
 local function CanActivate(entry)
@@ -473,11 +510,10 @@ local function RenderSearchSections(selectedSection)
     RenderResults()
 end
 
-local function ShowResults(matches, hint, answerText, sections, preserveKeyboard)
-    local selectedHeader = preserveKeyboard and SelectedDetailHeader()
-    if preserveKeyboard and resultKeyboardActive then
-        StopArrowRepeat()
-        arrowSelected, pressedResultEnter = nil, nil
+local function ShowResults(matches, hint, answerText, sections, preserveSections)
+    local selectedHeader = preserveSections and SelectedDetailHeader()
+    if resultKeyboardActive then
+        ResetResultKeys()
     else
         ReleaseResultKeyboard()
     end
@@ -495,7 +531,7 @@ local function ShowResults(matches, hint, answerText, sections, preserveKeyboard
         selected, firstVisible = sections and not sections.collapsible and 2 or 1, 1
     end
     resultSections = sections
-    if not preserveKeyboard then expandedSections, collapsedDetailSections = {}, {} end
+    if not preserveSections then expandedSections, collapsedDetailSections = {}, {} end
     local summaryText = hint or (#primaryResults == 0 and "No results found." or "")
     summary:SetText(summaryText)
     summary:SetShown(summaryText ~= "")
@@ -531,6 +567,7 @@ local function SearchNow()
     HideHover()
     ClearPending()
     local query = searchBox:GetText()
+    lastSearchText = query
     if not query:find("%S") then
         ShowResults({}, "")
         return
@@ -547,6 +584,44 @@ local function SearchNow()
             ShowResults(loadedMatches, loadedHint, loadedAnswer, loadedSections, true)
         end)
     end
+end
+
+local function EnableLinkedResultKeyboard()
+    if (#results > 0 or cancelStatSearch or CanGoBack()) and not InCombatLockdown() and not GetCurrentKeyBoardFocus() then
+        EnableResultKeyboard()
+    end
+end
+
+local function DisplaySearchQuery(query)
+    settingSearchText = true
+    searchBox:SetText(query)
+    settingSearchText = nil
+    SearchNow()
+    UpdateBackButton()
+end
+
+local function SetSearchQuery(query)
+    TrackSearchQuery(searchBox:GetText() or "")
+    TrackSearchQuery(query)
+    DisplaySearchQuery(query)
+end
+
+local function FollowSearchLink(query)
+    searchBox:ClearFocus()
+    SetSearchQuery(query)
+    EnableLinkedResultKeyboard()
+end
+
+local function GoBack()
+    CommitTypedQuery()
+    local query = table.remove(backQueries)
+    if not query then return end
+    queryPopup:Hide()
+    searchBox:ClearFocus()
+    navigationQuery = query
+    DisplaySearchQuery(query)
+    searchBox:SetCursorPosition(#query)
+    EnableLinkedResultKeyboard()
 end
 
 local function OpenItem(link, action)
@@ -592,11 +667,8 @@ local function SelectResult(entry)
     searchBox:ClearFocus()
     RememberQuery(searchBox:GetText())
     if entry.kind == "quest" or entry.kind == "dungeon" or entry.kind == "npc" or entry.kind == "object" then
-        local continueKeyboardNavigation = resultKeyboardActive
         local target = entry.kind == "dungeon" and entry.name or id
-        searchBox:SetText("@" .. entry.kind .. " " .. target)
-        SearchNow()
-        if continueKeyboardNavigation then searchBox:SetFocus() end
+        FollowSearchLink("@" .. entry.kind .. " " .. target)
         return
     end
     if entry.kind == "emote" then
@@ -726,7 +798,6 @@ local function ScrollTo(first)
     local nextStart = math.max(1, math.min(lastStart, first))
     if nextStart == firstVisible then return end
     StopArrowRepeat()
-    pressedResultEnter = nil
     firstVisible = nextStart
     selected = math.max(firstVisible, math.min(selected, firstVisible + visibleRows - 1))
     RefreshNavigation()
@@ -966,14 +1037,11 @@ local function CreateQueryPopup()
             end
             local query = self.query
             if not query then return end
-            local continueKeyboard = queryPopup.fromKeyboard and queryPopup.resultEntry
             if queryPopup.resultEntry then RememberQuery(searchBox:GetText()) end
             queryPopup:Hide()
             RememberQuery(query)
-            searchBox:SetText(query)
-            SearchNow()
+            FollowSearchLink(query)
             searchBox:SetCursorPosition(#query)
-            if continueKeyboard then searchBox:SetFocus() else searchBox:ClearFocus() end
         end)
         buttons[index] = button
     end
@@ -1124,15 +1192,16 @@ local function CreateQueryPopup()
             end
         end
         if index == 0 then return end
-        queryPopup.fromKeyboard = true
         buttons[index]:Click()
-        queryPopup.fromKeyboard = nil
     end
 
     function queryPopup.ShowResultChoices(owner)
         local entry = owner.entry
         if not entry or entry.sectionHeader or entry.toggleSection then return end
         local choices = addon.GetResultRelatedQueries(entry)
+        if entry.questReward then
+            table.insert(choices, 1, { name = "Search for this item", query = tostring(entry.id) })
+        end
         local locations = addon.GetResultMapPins(entry)
         local pinChoices = {}
         for _, location in ipairs(locations) do
@@ -1144,10 +1213,18 @@ local function CreateQueryPopup()
                 end,
             }
         end
-        if #pinChoices == 1 then
-            table.insert(choices, 1, { name = "Add map pin", action = pinChoices[1].action })
-        elseif #pinChoices > 1 then
-            table.insert(choices, 1, { name = "Add map pin", submenu = pinChoices })
+        if #pinChoices > 0 then
+            local pinPosition = 1
+            for index, choice in ipairs(choices) do
+                if choice.query and choice.query:match("^@quest ") then pinPosition = index + 1 end
+            end
+            local pin = { name = "Add map pin" }
+            if #pinChoices == 1 then
+                pin.action = pinChoices[1].action
+            else
+                pin.submenu = pinChoices
+            end
+            table.insert(choices, pinPosition, pin)
         end
         local related = #choices > 0
         if not entry.kind then
@@ -1211,11 +1288,27 @@ local function OnResultKeyDown(self, key)
         return
     end
     local navigating = not GetCurrentKeyBoardFocus()
+    if navigating and key == "BACKSPACE" and CanGoBack() then
+        GoBack()
+        self:SetPropagateKeyboardInput(false)
+        return
+    end
     local arrow = navigating and ARROW_DIRECTION[key]
-    local enter = navigating and (key == "ENTER" or key == "NUMPADENTER")
+    if navigating and (key == "ENTER" or key == "NUMPADENTER") then
+        self:SetPropagateKeyboardInput(false)
+        if heldResultEnter then return end
+        StopArrowRepeat()
+        heldResultEnter = key
+        if queryPopup.resultEntry then
+            queryPopup.ActivateChoice()
+        else
+            local entry = results[selected]
+            if CanActivate(entry) and not OpenSelectedMenu() then SelectResult(entry) end
+        end
+        return
+    end
     if navigating and (key == "LEFT" or (key == "ESCAPE" and queryPopup.resultEntry)) then
         self:SetPropagateKeyboardInput(false)
-        pressedResultEnter = nil
         if queryPopup.resultEntry then
             queryPopup:Hide()
         else
@@ -1225,39 +1318,27 @@ local function OnResultKeyDown(self, key)
     end
     if navigating and key == "RIGHT" then
         self:SetPropagateKeyboardInput(false)
-        pressedResultEnter = nil
         if not queryPopup.resultEntry then UseResultArrow(key) end
         return
     end
     if arrow and queryPopup.resultEntry then
         self:SetPropagateKeyboardInput(false)
-        pressedResultEnter = nil
         queryPopup.MoveSelection(arrow)
         return
     end
-    self:SetPropagateKeyboardInput(not (arrow or enter))
+    self:SetPropagateKeyboardInput(not arrow)
     if arrow then
-        pressedResultEnter = nil
         PressArrow(key)
-    elseif enter then
-        StopArrowRepeat()
-        pressedResultEnter = key
-    elseif not queryPopup.resultEntry then
+    elseif not navigating and not queryPopup.resultEntry then
         ReleaseResultKeyboard()
     end
 end
 
-local function OnResultKeyUp(_, key)
+local function OnResultKeyUp(self, key)
     if key == heldArrow then StopArrowRepeat() end
-    if key ~= pressedResultEnter then return end
-    pressedResultEnter = nil
-    if InCombatLockdown() or GetCurrentKeyBoardFocus() then return end
-    if queryPopup.resultEntry then
-        queryPopup.ActivateChoice()
-        return
-    end
-    local entry = results[selected]
-    if CanActivate(entry) and not OpenSelectedMenu() then SelectResult(entry) end
+    if key ~= heldResultEnter then return end
+    heldResultEnter = nil
+    if not InCombatLockdown() then self:SetPropagateKeyboardInput(false) end
 end
 
 EnableResultKeyboard = function()
@@ -1282,7 +1363,7 @@ local function OnSearchMouseDown()
         ReleaseResultKeyboard()
     elseif not GetCurrentKeyBoardFocus() then
         if debounce then SearchNow() end
-        if #results > 0 then EnableResultKeyboard() end
+        EnableLinkedResultKeyboard()
     end
 end
 
@@ -1441,7 +1522,7 @@ end
 local function CreateSearchControls()
     searchBox = CreateFrame("EditBox", nil, frame, "SearchBoxTemplate")
     searchBox:SetHeight(34)
-    searchBox:SetPoint("TOPLEFT", 24, -13)
+    searchBox:SetPoint("TOPLEFT", 39, -13)
     searchBox:SetPoint("TOPRIGHT", -72, -13)
     searchBox:SetFontObject("GameFontHighlightLarge")
     searchBox:SetTextColor(unpack(COLORS.text))
@@ -1456,11 +1537,30 @@ local function CreateSearchControls()
     end
     CreateQueryPopup()
     compactOptions = CreateCompactOptions()
+    backButton = CreateFrame("Button", nil, frame)
+    backButton:SetPoint("TOPLEFT", 8, -18)
+    backButton:SetSize(24, 24)
+    backButton:SetNormalTexture("Interface\\Buttons\\UI-SpellbookIcon-PrevPage-Up")
+    backButton:SetPushedTexture("Interface\\Buttons\\UI-SpellbookIcon-PrevPage-Down")
+    backButton:SetDisabledTexture("Interface\\Buttons\\UI-SpellbookIcon-PrevPage-Disabled")
+    backButton:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
+    SetButtonTooltip(backButton, "Back (Backspace)")
+    backButton:SetScript("OnClick", function(self)
+        HideButtonTooltip(self)
+        GoBack()
+    end)
+    UpdateBackButton()
     local closeButton = CreateFrame("Button", "QuickItemSearchCloseButton", frame, "UIPanelCloseButton")
     closeButton:SetSize(16, 16)
     closeButton:SetPoint("TOPRIGHT", 6, 7)
     closeButton:SetScript("OnClick", function() frame:Hide() end)
-    searchBox:HookScript("OnTextChanged", function()
+    searchBox:HookScript("OnTextChanged", function(self)
+        if settingSearchText then return end
+        local query = self:GetText()
+        -- The client can notify us again after a programmatic search has rendered.
+        if query == lastSearchText then return end
+        lastSearchText = query
+        UpdateBackButton()
         queryPopup:Hide()
         ReleaseResultKeyboard()
         CancelStatSearch()
@@ -1487,7 +1587,10 @@ local function CreateSearchControls()
         if key == heldArrow then StopArrowRepeat() end
     end)
     searchBox:HookScript("OnEditFocusGained", ReleaseResultKeyboard)
-    searchBox:HookScript("OnEditFocusLost", StopArrowRepeat)
+    searchBox:HookScript("OnEditFocusLost", function()
+        StopArrowRepeat()
+        CommitTypedQuery()
+    end)
     searchBox:SetScript("OnEnterPressed", function(self)
         if queryPopup:IsShown() and queryPopup.selected > 0 then
             queryPopup.buttons[queryPopup.selected]:Click()
@@ -1495,6 +1598,7 @@ local function CreateSearchControls()
         end
         queryPopup:Hide()
         RememberQuery(self:GetText())
+        CommitTypedQuery()
         if debounce then SearchNow() end
         local entry = arrowSelected and results[selected]
         ReleaseResultKeyboard()
@@ -1600,8 +1704,7 @@ local function CreateWindow()
                 end
                 return
             end
-            local resumeKeyboard = resultKeyboardActive
-            ReleaseResultKeyboard()
+            ResetResultKeys()
             selected = self.resultIndex
             for _, visible in ipairs(rows) do
                 SetRowSelected(visible, visible == self)
@@ -1609,7 +1712,7 @@ local function CreateWindow()
             local entry = self.entry
             if entry.sectionHeader then searchBox:ClearFocus() end
             SelectResult(entry)
-            if (resumeKeyboard or entry.sectionHeader or not entry.kind)
+            if (entry.sectionHeader or not entry.kind)
                 and not InCombatLockdown() and not GetCurrentKeyBoardFocus() then
                 EnableResultKeyboard()
             end
@@ -1701,6 +1804,7 @@ local function CreateWindow()
         queryPopup:Hide()
         compactOptions:Hide()
         RememberQuery(searchBox:GetText())
+        CommitTypedQuery()
         StopResizingWindow()
         ReleaseResultKeyboard()
         CancelStatSearch()
@@ -1724,9 +1828,9 @@ local function Toggle(query)
     end
     frame:Show()
     queryPopup:Hide()
+    ReleaseResultKeyboard()
     if query then RememberQuery(query) end
-    searchBox:SetText(query or "")
-    SearchNow()
+    SetSearchQuery(query or "")
     searchBox:SetFocus()
     searchBox:HighlightText()
 end

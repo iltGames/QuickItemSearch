@@ -26,8 +26,8 @@ end
 
 C_Item = { GetItemStats = function() return { ITEM_MOD_SPELL_POWER_SHORT = 5 } end }
 EMOTE19_TOKEN, EMOTE19_CMD1, EMOTE19_CMD2 = "WAVE", "/wave", "/greet"
-local function section(query, title)
-    local rows, _, _, _, sections = addon.Search(query)
+local function section(query, title, searchAddon)
+    local rows, _, _, _, sections = (searchAddon or addon).Search(query)
     if sections and sections.title == title then return rows end
     for _, entry in ipairs(sections or {}) do
         if entry.title == title then return entry.rows end
@@ -642,6 +642,33 @@ checkEnchants("enchant 17187")
 
 for _, file in ipairs({ "GearIndex", "CraftedIndex", "GearSearch" }) do
     assert(loadfile(file .. ".lua"))("QuickItemSearch", bundled)
+end
+do
+    local rows = section("First Aid", "Recipes", bundled)
+    local firstAidRecipes = {}
+    for _, row in ipairs(rows or {}) do
+        assert(not firstAidRecipes[row.id], "First Aid should show each recipe once")
+        firstAidRecipes[row.id] = row.profession
+    end
+    assert(firstAidRecipes[3275] == "First Aid", "First Aid should find the Linen Bandage recipe")
+    assert(section("First Aid", "Items", bundled)[1].id == 279968)
+    assert(section("First Aid", "Trainers", bundled), "First Aid should still list trainers")
+    local kitRecipes = section("First Aid Kit", "Recipes", bundled)
+    assert(#kitRecipes == 1 and kitRecipes[1].id == 1230117)
+    QuickItemSearchSettings = { hiddenSections = { Recipes = true } }
+    assert(not section("First Aid", "Recipes", bundled))
+    assert(section("craft first aid", "Recipes", bundled), "Direct profession recipe search should still work")
+    QuickItemSearchSettings = nil
+end
+for _, query in ipairs({ "first aid crafting", "crafting fa" }) do
+    local rows, _, _, _, sections = bundled.Search(query)
+    assert(sections and sections.title == "Recipes" and #rows > 0, query .. " should list First Aid recipes")
+    local foundLinenBandage
+    for _, row in ipairs(rows) do
+        assert(row.profession == "First Aid", query)
+        if row.id == 3275 then foundLinenBandage = true end
+    end
+    assert(foundLinenBandage, query .. " did not find Linen Bandage")
 end
 for _, query in ipairs({ "craft belt tailor", "tailoring belt craft", "make tailor belts" }) do
     local rows, hint = bundled.Search(query)

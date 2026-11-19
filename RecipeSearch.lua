@@ -145,7 +145,7 @@ function addon.SearchRecipeDetails(spellID)
     return first.rows, recipe[2]:gsub("|", "||"), nil, nil, sections
 end
 
-function addon.SearchRecipes(target, action, literal, requiredProfession)
+function addon.SearchRecipes(target, action, automatic, requiredProfession)
     local enchantsOnly = action == "enchant"
     local spellID = tonumber(target:match("^%d+$"))
     if not spellID and #target == 1 then
@@ -156,7 +156,7 @@ function addon.SearchRecipes(target, action, literal, requiredProfession)
     if #words == 0 and target ~= "" then return {}, "Enter a recipe name or a recipe spell ID." end
 
     local function Rank(text)
-        if not literal then return NameRank(text, target, words) end
+        if not automatic then return NameRank(text, target, words) end
         if text == target then return 3 end
         return text:find(target, 1, true) and 2 or 0
     end
@@ -167,6 +167,7 @@ function addon.SearchRecipes(target, action, literal, requiredProfession)
             and (not requiredProfession or profession == requiredProfession) then
             local key = name:lower()
             local rank = spellID and (id == spellID and 3 or 0) or Rank(key)
+            if automatic and profession:lower() == target then rank = 3 end
             if enchantsOnly and not spellID and rank == 0 and allStatsEnchants[id] then
                 rank = NameRank(key, target, words, true)
             end

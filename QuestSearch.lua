@@ -107,12 +107,16 @@ local function AddQuestContacts(rows, db, groups, label)
     end
 end
 
-local function LiveObjectives(id)
+local function IsOnQuest(id)
     local log = C_QuestLog
-    if not log or not log.IsOnQuest or not log.GetQuestObjectives then return end
-    local onOK, onQuest = pcall(log.IsOnQuest, id)
-    if not onOK or (issecretvalue and issecretvalue(onQuest)) or not onQuest then return end
-    local readOK, objectives = pcall(log.GetQuestObjectives, id)
+    if not log or not log.IsOnQuest then return end
+    local ok, onQuest = pcall(log.IsOnQuest, id)
+    return ok and (not issecretvalue or not issecretvalue(onQuest)) and onQuest
+end
+
+local function LiveObjectives(id)
+    if not IsOnQuest(id) or not C_QuestLog.GetQuestObjectives then return end
+    local readOK, objectives = pcall(C_QuestLog.GetQuestObjectives, id)
     if not readOK or (issecretvalue and issecretvalue(objectives)) or type(objectives) ~= "table" then return end
 
     local rows = {}
@@ -174,14 +178,16 @@ local function AddQuestObjectives(rows, db, id, data)
     end
 end
 
-local function AddQuestItems(rows, db, title, itemIDs)
+local function AddQuestItems(rows, db, title, itemIDs, isReward)
     if #itemIDs == 0 then return end
     rows[#rows + 1] = { kind = "text", name = title, sectionHeader = true }
     local seen = {}
     for _, itemID in ipairs(itemIDs) do
         if itemID > 0 and not seen[itemID] then
             seen[itemID] = true
-            rows[#rows + 1] = ItemRow(db, itemID)
+            local row = ItemRow(db, itemID)
+            row.questReward = isReward
+            rows[#rows + 1] = row
         end
     end
 end
@@ -225,6 +231,19 @@ local function AddQuestChains(rows, quests, id, catalog)
     if showNext then AddQuestChain(rows, quests, id, catalog.followUps, "Next quests", "ahead") end
 end
 
+local function QuestXPLabel(db, id)
+    if GetQuestLogRewardXP and IsOnQuest(id) then
+        local ok, xp = pcall(GetQuestLogRewardXP, id)
+        if ok and (not issecretvalue or not issecretvalue(xp)) and type(xp) == "number" and xp >= 0 then
+            return ("%d XP"):format(xp)
+        end
+    end
+    local support = db.Support and db.Support.Get and db.Support.Get("QuestXP")
+    local entry = support and support.db and support.db[id]
+    local xp = entry and entry[2]
+    if type(xp) == "number" and xp > 0 then return ("%d base XP"):format(xp) end
+end
+
 local function QuestDetails(db, id, name)
     local parts = { name }
     local zone = Read(db.Quest, id, "zoneOrSort")
@@ -234,6 +253,7 @@ local function QuestDetails(db, id, name)
     if type(requiredLevel) == "number" and requiredLevel > 0 then
         parts[#parts + 1] = ("Requires level %d"):format(requiredLevel)
     end
+    parts[#parts + 1] = QuestXPLabel(db, id)
     local title = (table.concat(parts, "  ·  "):gsub("|", "||"))
     local catalog, loadCatalog
     if addon.IsAutomaticSectionEnabled("Next quests") or addon.IsAutomaticSectionEnabled("Previous quests") then
@@ -253,7 +273,7 @@ local function QuestDetails(db, id, name)
             if objective[3] and objective[3] > 0 then required[#required + 1] = objective[3] end
         end
         AddQuestItems(rows, db, "Required items", required)
-        AddQuestItems(rows, db, "Reward items", rewards and rewards[id] or {})
+        AddQuestItems(rows, db, "Reward items", rewards and rewards[id] or {}, true)
         AddQuestChains(rows, db.Quest, id, catalog)
         return rows
     end

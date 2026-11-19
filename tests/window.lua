@@ -21,7 +21,10 @@ function methods:SetScript(name, callback)
         self.keyboardEnabled = true
     end
 end
-function methods:EnableKeyboard(enabled) self.keyboardEnabled = enabled end
+function methods:EnableKeyboard(enabled)
+    if not enabled then self.keyboardReleases = (self.keyboardReleases or 0) + 1 end
+    self.keyboardEnabled = enabled
+end
 function methods:RegisterEvent(event)
     self.events = self.events or {}
     self.events[event] = true
@@ -419,8 +422,7 @@ assert(not PressWindowKey("DOWN"), "Clicking back should restore arrow navigatio
 assert(not PressWindowKey("ENTER"))
 window.scripts.OnKeyUp(window, "ENTER")
 assert(lastEmote == "Bow", "Arrow navigation should resume from the previous result")
-assert(PressWindowKey("W") and not window.keyboardEnabled,
-    "movement must pass through and end result navigation")
+assert(PressWindowKey("W"), "movement keys must pass through to the game")
 
 local questProgress = "1/4"
 local morePrerequisites
@@ -606,8 +608,14 @@ assert(IsPopupQueryHighlighted("@quest 86"), "Refocusing should preserve the ope
 assert(not PressWindowKey("DOWN"), "Down should navigate the open context menu")
 assert(not PressWindowKey("ENTER"))
 window.scripts.OnKeyUp(window, "ENTER")
-assert(searchBox:GetText() == "@quest 86" and GetCurrentKeyBoardFocus() == searchBox,
-    "Keyboard activation should still allow keyboard navigation into the quest details")
+assert(searchBox:GetText() == "@quest 86" and not GetCurrentKeyBoardFocus(),
+    "Opening a related search with Enter must leave the query box unfocused")
+assert(PressWindowKey("W"), "Moving after opening a link should pass the movement key to the game")
+assert(not PressWindowKey("DOWN")
+    and assert(Result(function(entry) return entry.name == "Reward details loaded" end)).selection:IsShown(),
+    "Down should move the selection in the linked results")
+assert(not PressWindowKey("BACKSPACE") and searchBox:GetText() == "@quest pie",
+    "A linked search opened with Enter should be immediately reversible with Backspace")
 toggle("@quest pie")
 searchBox.scripts.OnArrowPressed(searchBox, "UP")
 searchBox.scripts.OnArrowPressed(searchBox, "RIGHT")
@@ -850,6 +858,10 @@ assert(settingsRewards:GetChecked(), "Quest reward links should be on by default
 assert(not PreferenceCheckbox(compact, "Quest reward links"), "Quest reward links belong in AddOns settings")
 local reloaded = {}
 assert(loadfile("Search.lua"))("QuickItemSearch", reloaded)
+for _, panel in ipairs({ compact, addonOptions }) do
+    assert(not PreferenceCheckbox(panel, "Quest XP") and not PreferenceCheckbox(panel, "Back navigation"),
+        "Always-on features should have no checkboxes")
+end
 for _, section in ipairs({ "Next quests", "Previous quests", "NPC Loot", "Vendor Items" }) do
     local check = assert(PreferenceCheckbox(addonOptions, section))
     assert(check:GetChecked() and not PreferenceCheckbox(compact, section),
@@ -917,6 +929,7 @@ assert(not compact:IsShown(), "Options must close with the search window")
 
 settingsRewards:SetChecked(false)
 settingsRewards:Click()
+QuickItemSearchSettings.backNavigation = false
 addon.GetItemQuestRequirements = function() return {} end
 assert(loadfile("UI.lua"))("QuickItemSearch", addon)
 addonOptions:Hide()
@@ -975,7 +988,7 @@ ClickQuery("usedin 3820")
 assert(Result(function(entry) return entry.id == 501 end), "The reagent menu must open recipes despite old settings")
 
 local placed
-local mobSpawns = { [12] = { { 26.25, 87 }, { 32, 75 } }, [40] = { { 12, 30 } } }
+local mobSpawns = { [12] = { { 26.24, 87 }, { 32, 75 } }, [40] = { { 12, 30 } } }
 for i = 1, 8 do mobSpawns[12][#mobSpawns[12] + 1] = { 32 + i, 75 } end
 C_Map = {
     GetAreaInfo = function(id) return id == 12 and "Elwynn Forest" or "Westfall" end,
@@ -990,9 +1003,11 @@ LibQuestieDB = {
     Npc = { Get = function(id, field)
         if field == "name" then return "River Wolf" end
         if field == "spawns" then return mobSpawns end
+        if field == "questStarts" then return { 99, 100 } end
     end },
-    Quest = { Get = function(_, field)
+    Quest = { Get = function(id, field)
         if field == "startedBy" then return { { 448 } } end
+        if field == "name" then return id == 99 and "Find the River Wolf" or "Cross the River" end
     end },
 }
 QuickItemSearchSettings.mapPinActions = false
@@ -1014,6 +1029,9 @@ reloadToggle("mob")
 local mob = assert(Result(function(entry) return entry.kind == "npc" end))
 mob.scripts.OnClick(mob, "RightButton")
 local pinAction = assert(PopupChoice("Add map pin"), "NPC results with coordinates must offer a map pin")
+local lastNpcQuest = assert(PopupChoice("Open quest: Cross the River"))
+assert(lastNpcQuest.top - lastNpcQuest:GetHeight() == pinAction.top,
+    "Add map pin should appear directly below the NPC's quest links")
 local pinScrollbar = assert(PopupScrollbar(pinAction.parent))
 assert(not pinScrollbar:IsShown(), "A short context menu should hide the scrollbar")
 pinAction:Click()
@@ -1026,14 +1044,18 @@ assert(PopupChoice("Back")):Click()
 assert(PopupChoice("View NPC details") and not pinScrollbar:IsShown(), "Back should restore the short parent menu")
 assert(PopupChoice("Add map pin")):Click()
 assert(PopupChoice("Elwynn Forest (26.2, 87.0)")):Click()
-assert(placed and placed[1] == 1429 and placed[2] == 0.2625 and placed[3] == 0.87,
+assert(placed and placed[1] == 1429 and math.abs(placed[2] - 0.2624) < 0.000001 and placed[3] == 0.87,
     "The pin must use the mapped UI map ID and preserve unrounded coordinates")
 assert(searchBox:GetText() == "mob", "Placing a pin must not replace the current search")
 reloadToggle("quest")
 local startQuest = assert(Result(function(entry) return entry.kind == "quest" and entry.id == 99 end))
 startQuest.scripts.OnClick(startQuest, "RightButton")
-assert(PopupChoice("Add map pin") and PopupChoice("Open quest"),
-    "Old settings should not hide the quest's starter pin or other actions")
+do
+    local openQuest = assert(PopupChoice("Open quest"), "Old settings should retain the quest action")
+    local questPin = assert(PopupChoice("Add map pin"), "Old settings should retain the quest's starter pin")
+    assert(openQuest.top - openQuest:GetHeight() == questPin.top,
+        "Add map pin should appear directly below Open quest")
+end
 SlashCmdList.QUICKITEMSEARCH("gather")
 local node = assert(Result(function(entry) return entry.kind == "text" and entry.areaID == 12 end))
 node.scripts.OnClick(node, "RightButton")
@@ -1095,5 +1117,160 @@ assert(liveWindow.scripts.OnKeyDown)
 liveWindow.scripts.OnKeyDown(liveWindow, "LEFT")
 assert(not PopupChoice("Back") and not PopupChoice("How to learn"),
     "Left should close the entire context menu from a submenu")
+
+do
+    liveWindow:Hide()
+    assert(loadfile("UI.lua"))("QuickItemSearch", addon)
+    reloadToggle = SlashCmdList.QUICKITEMSEARCH
+    local searchQuery, finishRewardSearch
+    C_Item.IsItemDataCachedByID = function() return false end
+    function addon.Search(query)
+        searchQuery = query
+        if query == "thrash blade" then return { { id = 17705, name = "Thrash Blade" } } end
+        if query == "@quest 7065" then
+            return {
+                { kind = "quest", id = 7066, name = "Related quest" },
+                { id = 12345, name = "Other Reward", questReward = true },
+            }, "Quest details"
+        end
+        if query == "quest name" then return { { kind = "quest", id = 7065, name = "Corruption of Earth and Seed" } } end
+        if query == "12345" then
+            return {}, "Loading reward details", function(done)
+                finishRewardSearch = done
+                return Noop
+            end
+        end
+        return {}
+    end
+    function addon.IsQuestDetailQuery(query) return query == "@quest 7065" end
+    addon.GetItemQuestChoices = function(id)
+        return id == 17705 and { { id = 7065, name = "Corruption of Earth and Seed", reward = true } } or {}
+    end
+    reloadToggle("thrash blade")
+    local backWindow = QuickItemSearchFrame
+    local backButton
+    for _, button in ipairs(buttons) do
+        if button.parent == backWindow and button.tooltipText and button.tooltipText:match("^Back") then backButton = button end
+    end
+    assert(backButton and backButton:IsShown(), "Old settings should not hide the Back arrow")
+    assert(not backButton.enabled, "A fresh search starts with no Back destination")
+    local blade = assert(Result(function(entry) return entry.id == 17705 end))
+    blade.scripts.OnClick(blade, "RightButton")
+    backWindow.scripts.OnKeyDown(backWindow, "ENTER")
+    assert(searchQuery == "@quest 7065" and not backWindow.propagateKeyboard,
+        "Enter should open the quest from the Thrash Blade context menu on key-down")
+    do
+        local timer, debounceScheduled = C_Timer, false
+        C_Timer = { NewTimer = function()
+            debounceScheduled = true
+            return { Cancel = Noop }
+        end }
+        searchBox.scripts.OnTextChanged(searchBox, false)
+        C_Timer = timer
+        assert(backWindow.keyboardEnabled and not debounceScheduled,
+            "A delayed notification for unchanged quest text must keep keyboard navigation and skip a second search")
+    end
+    backWindow.scripts.OnKeyDown(backWindow, "ENTER")
+    assert(not VisiblePopupQuery("@quest 7066") and not backWindow.propagateKeyboard,
+        "Holding Enter across the handoff should not activate the destination")
+    backWindow.scripts.OnKeyDown(backWindow, "W")
+    assert(backWindow.propagateKeyboard, "An unrelated key should still reach the game")
+    backWindow.scripts.OnKeyUp(backWindow, "ENTER")
+    assert(not backWindow.propagateKeyboard, "The Enter release should stay with the addon after the quest opens")
+    local reward = assert(Result(function(entry) return entry.questReward end))
+    assert(backWindow.keyboardEnabled and not GetCurrentKeyBoardFocus(), "The quest should open in results navigation")
+    backWindow.scripts.OnKeyDown(backWindow, "DOWN")
+    assert(reward.selection:IsShown(), "Down should select the reward immediately after opening the quest")
+    reward.scripts.OnClick(reward, "RightButton")
+    local releasesBeforeLink = backWindow.keyboardReleases
+    local originalTimer = C_Timer
+    C_Timer = { NewTimer = function() return { Cancel = Noop } end }
+    function searchBox:SetText(text)
+        methods.SetText(self, text)
+        self.scripts.OnTextChanged(self, false)
+    end
+    ClickQuery("12345")
+    searchBox.SetText = nil
+    C_Timer = originalTimer
+    assert(searchQuery == "12345" and backButton.enabled, "Reward searches should preserve the quest in the trail")
+    assert(backWindow.keyboardReleases == releasesBeforeLink, "Opening a link should keep the results keyboard active")
+    finishRewardSearch({ { kind = "text", name = "Reward details" }, { kind = "text", name = "Reward source" } })
+    backWindow.scripts.OnKeyDown(backWindow, "DOWN")
+    assert(assert(Result(function(entry) return entry.name == "Reward source" end)).selection:IsShown(),
+        "Down should move through the newly loaded results without another click")
+    local function PressBackspace()
+        if not backWindow.keyboardEnabled then return true end
+        backWindow.scripts.OnKeyDown(backWindow, "BACKSPACE")
+        return backWindow.propagateKeyboard
+    end
+    assert(not PressBackspace(), "Backspace should be consumed after following a related search")
+    assert(searchQuery == "@quest 7065" and backButton.enabled, "Backspace should reopen the quest")
+    assert(not PressBackspace(), "Backspace should stay active for the next step")
+    assert(searchQuery == "thrash blade" and searchBox:GetText() == "thrash blade" and not backButton.enabled,
+        "Backspace should rerun the original search and stop there")
+    assert(PressBackspace(), "Backspace should pass through when there is no previous search")
+
+    reloadToggle("quest name")
+    assert(Result(function(entry) return entry.kind == "quest" end)):Click()
+    assert(searchQuery == "@quest 7065" and backButton.enabled, "Direct quest clicks should also be reversible")
+    searchBox:SetFocus()
+    assert(PressBackspace() and searchQuery == "@quest 7065" and backButton.enabled,
+        "Backspace should be left to the edit box while typing")
+    searchBox.scripts.OnEnterPressed(searchBox)
+    assert(not PressBackspace() and searchQuery == "quest name", "Backspace should also undo a direct quest click")
+    assert(Result(function(entry) return entry.kind == "quest" end)):Click()
+    backWindow.scripts.OnEvent(backWindow, "QUEST_LOG_UPDATE")
+    assert(backButton.enabled, "Refreshing the view should retain its Back destination")
+    backButton:Click()
+    assert(searchQuery == "quest name" and backButton.enabled,
+        "Starting a search with a slash command should preserve the previous search")
+    assert(Result(function(entry) return entry.kind == "quest" end)):Click()
+    local timer = C_Timer
+    local preview
+    C_Timer = { NewTimer = function(_, callback)
+        preview = callback
+        return { Cancel = Noop }
+    end }
+    searchBox:SetFocus()
+    for _, text in ipairs({ "", "typed", "typed search" }) do
+        searchBox:SetText(text)
+        searchBox.scripts.OnTextChanged(searchBox, true)
+        preview()
+    end
+    C_Timer = timer
+    searchBox.scripts.OnEnterPressed(searchBox)
+    assert(backButton.enabled and searchQuery == "typed search", "Typing a fresh search should retain Back")
+    reloadToggle("standalone")
+    backButton:Click()
+    assert(searchQuery == "typed search", "Back should return to the last search after a slash command")
+    assert(not PressBackspace() and searchQuery == "@quest 7065", "Back should skip partial typing and the empty box")
+    assert(not PressBackspace() and searchQuery == "quest name", "An older linked search should remain in the trail")
+    assert(not PressBackspace() and searchQuery == "thrash blade" and not backButton.enabled,
+        "The original search should remain reachable across typed and slash searches")
+
+    backWindow:Hide()
+    reloadToggle()
+    assert(backButton.enabled, "Reopening the search window with an empty box should retain Back")
+    backButton:Click()
+    assert(searchQuery == "thrash blade" and not backButton.enabled)
+
+    local function OpenSearchMenu(label)
+        for _, button in ipairs(buttons) do
+            if button.parent == backWindow and button.tooltipText == label then
+                button:Click()
+                return
+            end
+        end
+        error("Missing search menu: " .. label)
+    end
+    OpenSearchMenu("Examples")
+    assert(VisiblePopupQuery(upgradeExample)):Click()
+    assert(searchQuery == upgradeExample)
+    OpenSearchMenu("History")
+    assert(VisiblePopupQuery("standalone")):Click()
+    assert(searchQuery == "standalone")
+    assert(not PressBackspace() and searchQuery == upgradeExample, "Back should undo a search picked from History")
+    assert(not PressBackspace() and searchQuery == "thrash blade", "Back should also undo a search picked from Examples")
+end
 
 print("Window sizing and search options passed")

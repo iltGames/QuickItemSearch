@@ -109,6 +109,8 @@ assert(load, "Reward loading must allow the quest details to appear first")
 load(function(found) rows = found end)
 RunTimers()
 assert(FindName("Reward").id == 789 and not FindName("Reward").kind)
+assert(FindName("Reward").questReward and not FindName("Tough Jerky").questReward,
+    "Only reward rows should offer a search for the reward item")
 assert(FindName("Next quests").sectionHeader and FindName("Next quests").collapsible == 7)
 for _, name in ipairs({ "Back to Billy", "Send a Letter", "Visit the Farm", "Check In", "One More Favor" }) do
     assert(FindName(name).kind == "quest", "Follow-up should be clickable: " .. name)
@@ -161,6 +163,28 @@ C_QuestLog = {
         }
     end,
 }
+local liveXP = 450
+GetQuestLogRewardXP = function(id)
+    if id == 86 then return liveXP end
+    return 0
+end
+LibQuestieDB.Support = { Get = function(module)
+    if module == "QuestXP" then return { db = { [86] = { 6, 350 }, [87] = { 7, 480 } } } end
+end }
+local function QuestTitle(id)
+    local _, title = addon.Search("@quest " .. id)
+    return title
+end
+assert(QuestTitle(86):find("450 XP", 1, true), "Quest details should use the character's live XP reward")
+assert(QuestTitle(87):find("480 base XP", 1, true), "Unaccepted quests should show labeled base XP")
+assert(not QuestTitle(88):find("XP", 1, true), "Unknown XP should be omitted")
+liveXP = 0
+assert(QuestTitle(86):find("0 XP", 1, true), "A live zero reward should take precedence over base XP")
+liveXP = nil
+assert(QuestTitle(86):find("350 base XP", 1, true), "Missing live XP should fall back to indexed XP")
+QuickItemSearchSettings = { hiddenSections = { ["Quest XP"] = true } }
+assert(QuestTitle(86):find("350 base XP", 1, true), "Old settings should not hide quest XP")
+QuickItemSearchSettings = nil
 rows, _, load = addon.Search("@quest 86")
 assert(not load and FindName("Chunks of Boar Meat collected").matchLabel == "3/4")
 assert(FindName("Talk to Billy").matchLabel == "Complete")
