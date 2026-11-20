@@ -1,3 +1,7 @@
+## Quick Item Search 0.4.15
+
+- Previous and next quest steps now show your faction and shared quests by default. Faction-specific steps display Alliance or Horde beside the step count. Enable **Show both factions in quest chains** in the search cog or AddOns settings to see both versions.
+
 ## Quick Item Search 0.4.14
 
 - Find Heavy Mageweave Bandage, Runecloth Bandage, and Heavy Runecloth Bandage in item search and `craft fa`. Each recipe shows all four First Aid skill-up thresholds.

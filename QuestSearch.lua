@@ -192,7 +192,25 @@ local function AddQuestItems(rows, db, title, itemIDs, isReward)
     end
 end
 
-local function AddQuestChain(rows, quests, id, links, title, direction)
+local function RaceMasksOverlap(first, second)
+    -- Forever uses race bits above the client's 32-bit bitwise range.
+    while first > 0 and second > 0 do
+        if first % 2 == 1 and second % 2 == 1 then return true end
+        first, second = math.floor(first / 2), math.floor(second / 2)
+    end
+    return false
+end
+
+local function QuestFaction(quests, id, masks)
+    if not masks then return end
+    local requiredRaces = Read(quests, id, "requiredRaces")
+    if type(requiredRaces) ~= "number" or requiredRaces <= 0 then return end
+    local alliance = RaceMasksOverlap(requiredRaces, masks.Alliance)
+    local horde = RaceMasksOverlap(requiredRaces, masks.Horde)
+    if alliance ~= horde then return alliance and "Alliance" or "Horde" end
+end
+
+local function AddQuestChain(rows, quests, id, links, title, direction, masks, playerFaction)
     local entries, queue, steps = {}, { id }, { [id] = 0 }
     local first = 1
     while first <= #queue do
@@ -201,11 +219,15 @@ local function AddQuestChain(rows, quests, id, links, title, direction)
         for _, linkedID in ipairs(links[questID] or {}) do
             if steps[linkedID] == nil then
                 steps[linkedID] = distance
-                queue[#queue + 1] = linkedID
-                local index = #entries + 1
-                AddQuestTitle(entries, quests, linkedID)
-                if entries[index] then
-                    entries[index].matchLabel = ("%d %s %s"):format(distance, distance == 1 and "step" or "steps", direction)
+                local faction = QuestFaction(quests, linkedID, masks)
+                if not playerFaction or not faction or faction == playerFaction then
+                    queue[#queue + 1] = linkedID
+                    local index = #entries + 1
+                    AddQuestTitle(entries, quests, linkedID)
+                    if entries[index] then
+                        local label = ("%d %s %s"):format(distance, distance == 1 and "step" or "steps", direction)
+                        entries[index].matchLabel = faction and (label .. " · " .. faction) or label
+                    end
                 end
             end
         end
@@ -219,16 +241,28 @@ local function AddQuestChain(rows, quests, id, links, title, direction)
     for _, entry in ipairs(entries) do rows[#rows + 1] = entry end
 end
 
-local function AddQuestChains(rows, quests, id, catalog)
+local function AddQuestChains(rows, db, id, catalog)
     local showPrevious = addon.IsAutomaticSectionEnabled("Previous quests")
     local showNext = addon.IsAutomaticSectionEnabled("Next quests")
     if not showPrevious and not showNext then return end
+    local quests = db.Quest
     if not catalog or not catalog.followUps then
         catalog = { followUps = {}, prerequisites = {} }
         IndexQuestLinks(catalog, quests, id)
     end
-    if showPrevious then AddQuestChain(rows, quests, id, catalog.prerequisites, "Previous quests", "back") end
-    if showNext then AddQuestChain(rows, quests, id, catalog.followUps, "Next quests", "ahead") end
+    local masks = db.Enum and db.Enum.factionRaceMasks
+    if masks and (type(masks.Alliance) ~= "number" or type(masks.Horde) ~= "number") then masks = nil end
+    local playerFaction
+    if masks and UnitFactionGroup and not addon.ShouldShowBothQuestFactions() then
+        local faction = UnitFactionGroup("player")
+        if faction == "Alliance" or faction == "Horde" then playerFaction = faction end
+    end
+    if showPrevious then
+        AddQuestChain(rows, quests, id, catalog.prerequisites, "Previous quests", "back", masks, playerFaction)
+    end
+    if showNext then
+        AddQuestChain(rows, quests, id, catalog.followUps, "Next quests", "ahead", masks, playerFaction)
+    end
 end
 
 local function QuestXPLabel(db, id)
@@ -274,7 +308,7 @@ local function QuestDetails(db, id, name)
         end
         AddQuestItems(rows, db, "Required items", required)
         AddQuestItems(rows, db, "Reward items", rewards and rewards[id] or {}, true)
-        AddQuestChains(rows, db.Quest, id, catalog)
+        AddQuestChains(rows, db, id, catalog)
         return rows
     end
 

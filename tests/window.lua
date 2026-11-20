@@ -858,6 +858,21 @@ assert(settingsRewards:GetChecked(), "Quest reward links should be on by default
 assert(not PreferenceCheckbox(compact, "Quest reward links"), "Quest reward links belong in AddOns settings")
 local reloaded = {}
 assert(loadfile("Search.lua"))("QuickItemSearch", reloaded)
+local factionPreference = "Show both factions in quest chains"
+local compactFactions = assert(PreferenceCheckbox(compact, factionPreference))
+local settingsFactions = assert(PreferenceCheckbox(addonOptions, factionPreference))
+assert(not compactFactions:GetChecked() and not settingsFactions:GetChecked(), "Default to the player's faction")
+before = visibleSearches
+compactFactions:SetChecked(true)
+compactFactions:Click()
+assert(settingsFactions:GetChecked() and reloaded.ShouldShowBothQuestFactions() and visibleSearches == before + 1,
+    "Changing the faction preference should sync both menus and refresh the open search")
+settingsFactions:SetChecked(false)
+settingsFactions:Click()
+assert(not compactFactions:GetChecked() and not reloaded.ShouldShowBothQuestFactions(),
+    "Turning off both factions in AddOns settings should update the cog menu")
+compactFactions:SetChecked(true)
+compactFactions:Click()
 for _, panel in ipairs({ compact, addonOptions }) do
     assert(not PreferenceCheckbox(panel, "Quest XP") and not PreferenceCheckbox(panel, "Back navigation"),
         "Always-on features should have no checkboxes")
@@ -936,6 +951,8 @@ addonOptions:Hide()
 addonOptions:Show()
 local reloadedRewards = assert(PreferenceCheckbox(addonOptions, "Quest reward links"))
 assert(not reloadedRewards:GetChecked(), "Disabled quest reward links should persist after reload")
+assert(assert(PreferenceCheckbox(addonOptions, factionPreference)):GetChecked(),
+    "The quest chain faction preference should persist after reload")
 for _, section in ipairs({ "Next quests", "Previous quests", "NPC Loot", "Vendor Items" }) do
     assert(not assert(PreferenceCheckbox(addonOptions, section)):GetChecked(), "Detail visibility should persist after reload")
 end

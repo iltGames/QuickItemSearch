@@ -206,6 +206,54 @@ RunTimers()
 assert(FindName("Pie for Billy").matchLabel == "3 steps back" and not FindName("Next quests"))
 QuickItemSearchSettings = nil
 
+quests[100] = { name = "Shared starting quest", requiredRaces = 0, childQuests = { 101, 102, 103 } }
+quests[101] = { name = "Faction follow-up", requiredRaces = 4294967296, preQuestSingle = { 100 },
+    childQuests = { 104, 105 } }
+quests[102] = { name = "Faction follow-up", requiredRaces = 8589934592, preQuestSingle = { 100 },
+    childQuests = { 104, 106 } }
+quests[103] = { name = "Shared option", requiredRaces = 3 }
+quests[104] = { name = "Shared finale", preQuestGroup = { 101, 102 } }
+quests[105] = { name = "Alliance branch finale" }
+quests[106] = { name = "Horde branch finale" }
+LibQuestieDB.Enum = { factionRaceMasks = { Alliance = 4294967297, Horde = 8589934594 } }
+LibQuestieDB.Quest = {
+    GetAllIds = function() return { 100, 101, 102, 103, 104, 105, 106 } end,
+    Get = questDB.Get,
+}
+local playerFaction = "Alliance"
+UnitFactionGroup = function(unit) if unit == "player" then return playerFaction end end
+local function FindQuest(id)
+    return Find(rows, function(row) return row.kind == "quest" and row.id == id end)
+end
+rows, _, load = addon.Search("@quest 100")
+assert(load and FindQuest(101) and not FindQuest(102), "Filter explicit links while the index loads")
+load(function(found) rows = found end)
+RunTimers()
+assert(FindQuest(101).matchLabel == "1 step ahead · Alliance" and not FindQuest(102),
+    "Alliance should only see its own faction's follow-up, with a faction label")
+assert(FindQuest(103).matchLabel == "1 step ahead" and FindQuest(104).matchLabel == "2 steps ahead",
+    "Shared quests should keep their step counts without a faction label")
+assert(FindQuest(105) and not FindQuest(106), "The traversal should stay out of the opposing branch")
+rows = addon.Search("@quest 104")
+assert(FindQuest(101).matchLabel == "1 step back · Alliance" and not FindQuest(102),
+    "Previous steps should use the same faction filter")
+playerFaction = "Horde"
+rows = addon.Search("@quest 100")
+assert(FindQuest(102).matchLabel == "1 step ahead · Horde" and not FindQuest(101) and FindQuest(106),
+    "Horde should see its own branch when using the same quest index")
+QuickItemSearchSettings = { showBothQuestFactions = true }
+rows = addon.Search("@quest 100")
+assert(FindQuest(101) and FindQuest(102) and FindQuest(105) and FindQuest(106),
+    "Showing both factions should include both branches")
+rows = addon.Search("@quest 104")
+assert(FindQuest(101).matchLabel == "1 step back · Alliance" and FindQuest(102).matchLabel == "1 step back · Horde")
+assert(#addon.Search("@quest faction follow-up") == 2, "Faction preferences should only affect chain rows")
+QuickItemSearchSettings = nil
+LibQuestieDB.Enum = nil
+rows = addon.Search("@quest 104")
+assert(FindQuest(101).matchLabel == "1 step back" and FindQuest(102).matchLabel == "1 step back",
+    "Without faction metadata, preserve chain links")
+
 LibQuestieDB = nil
 rows, message = addon.Search("@quest pie")
 assert(#rows == 0 and message:find("QuestieDB", 1, true))

@@ -1431,10 +1431,23 @@ local function CreateSearchPreferences(panel, anchor, margin, includeDetailOptio
     end
     local sectionBottom = AddSectionCheckboxes(sectionsLabel, addon.automaticSections)
 
+    local questFactions = CreateFrame("CheckButton", nil, panel, "UICheckButtonTemplate")
+    questFactions:SetSize(24, 24)
+    questFactions:SetPoint("TOPLEFT", sectionsLabel, "BOTTOMLEFT", 0, sectionBottom)
+    local questFactionsLabel = questFactions:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+    questFactionsLabel:SetPoint("LEFT", questFactions, "RIGHT", 1, 0)
+    questFactionsLabel:SetText("Show both factions in quest chains")
+    questFactions:SetHitRectInsets(0, -questFactionsLabel:GetStringWidth() - 1, 0, 0)
+    questFactions:SetScript("OnClick", function(self)
+        GetSettings().showBothQuestFactions = not not self:GetChecked()
+        RefreshSearchPreferences()
+        if frame and frame:IsShown() then SearchNow() end
+    end)
+
     local rewardLinks
     if includeDetailOptions then
         local detailsLabel = panel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-        detailsLabel:SetPoint("TOPLEFT", sectionsLabel, "BOTTOMLEFT", 0, sectionBottom)
+        detailsLabel:SetPoint("TOPLEFT", questFactions, "BOTTOMLEFT", 0, -10)
         detailsLabel:SetText("Detail view sections")
         local detailsBottom = AddSectionCheckboxes(detailsLabel, { "Previous quests", "Next quests", "NPC Loot", "Vendor Items" })
 
@@ -1456,6 +1469,7 @@ local function CreateSearchPreferences(panel, anchor, margin, includeDetailOptio
         local current = GetHistoryLimit()
         for limit, button in pairs(limitButtons) do button:SetEnabled(limit ~= current) end
         for section, check in pairs(checks) do check:SetChecked(addon.IsAutomaticSectionEnabled(section)) end
+        questFactions:SetChecked(addon.ShouldShowBothQuestFactions())
         if rewardLinks then rewardLinks:SetChecked(QuestRewardLinksEnabled()) end
     end
     panel:HookScript("OnShow", Refresh)
@@ -1465,7 +1479,7 @@ end
 local function CreateCompactOptions()
     local width = 272
     local panel = CreateFrame("Frame", "QuickItemSearchOptionsFrame", frame, "BackdropTemplate")
-    panel:SetSize(width, 128 + math.ceil(#addon.automaticSections / 2) * 24)
+    panel:SetSize(width, 158 + math.ceil(#addon.automaticSections / 2) * 24)
     panel:SetFrameStrata("DIALOG")
     panel:SetFrameLevel(frame:GetFrameLevel() + 5)
     panel:SetClampedToScreen(true)

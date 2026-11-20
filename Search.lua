@@ -14,6 +14,11 @@ end
 
 addon.IsAutomaticSectionEnabled = IsAutomaticSectionEnabled
 
+function addon.ShouldShowBothQuestFactions()
+    local settings = _G[settingsKey]
+    return type(settings) == "table" and settings.showBothQuestFactions == true
+end
+
 local searchShortcuts = {
     ["@target"] = "@target", ["@t"] = "@target",
     ["@me"] = "@me", ["@gear"] = "@me",
