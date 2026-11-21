@@ -1,3 +1,7 @@
+## Quick Item Search 0.4.16
+
+- Rename the emote alias loop counter to make its role in reading numbered WoW commands clearer.
+
 ## Quick Item Search 0.4.15
 
 - Previous and next quest steps now show your faction and shared quests by default. Faction-specific steps display Alliance or Horde beside the step count. Enable **Show both factions in quest chains** in the search cog or AddOns settings to see both versions.

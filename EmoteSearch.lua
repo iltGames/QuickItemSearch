@@ -12,10 +12,10 @@ local function GetEmotes()
             local name = _G[prefix .. 1]
             if name and name ~= "" then
                 local aliases = { token:lower() }
-                local n = 1
-                while _G[prefix .. n] do
-                    aliases[#aliases + 1] = _G[prefix .. n]:lower():gsub("^/", "")
-                    n = n + 1
+                local aliasIndex = 1
+                while _G[prefix .. aliasIndex] do
+                    aliases[#aliases + 1] = _G[prefix .. aliasIndex]:lower():gsub("^/", "")
+                    aliasIndex = aliasIndex + 1
                 end
                 emotes[#emotes + 1] = { kind = "emote", name = name, token = token, aliases = aliases }
             end
