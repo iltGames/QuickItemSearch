@@ -21,13 +21,13 @@ function addon.FindNPCNames(query)
     local npcs = GetNPCs()
     if not npcs or not npcs.GetAllIds then return {} end
     query = query:gsub("%s+", " ")
-    local index, load = addon.ReadQuestieIndex(npcIndex, npcs, AddNPCName)
-    if not load then
+    local index, loadNames = addon.ReadQuestieIndex(npcIndex, npcs, AddNPCName)
+    if not loadNames then
         local matches = addon.FindNamedEntries(index, query)
         return matches
     end
     return {}, function(done)
-        return load(function(entries) done(addon.FindNamedEntries(entries, query)) end)
+        return loadNames(function(entries) done(addon.FindNamedEntries(entries, query)) end)
     end
 end
 

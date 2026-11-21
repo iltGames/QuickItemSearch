@@ -1,3 +1,7 @@
+## Quick Item Search 0.4.18
+
+- Clarify the name of the deferred NPC search callback that loads the name index.
+
 ## Quick Item Search 0.4.17
 
 - Clarify the name of the lookup table used to skip duplicate map pins.
