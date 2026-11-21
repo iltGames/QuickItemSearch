@@ -47,14 +47,14 @@ function addon.GetResultMapPins(entry)
     local pins = {}
     if not C_Map then return pins end
     local db = _G.LibQuestieDB
-    local seen = {}
+    local seenPinKeys = {}
     local function AddLocation(location, name)
         if not location.x or not location.y or (location.x == 0 and location.y == 0) then return end
         local mapID = addon.GetAreaMapID(db, location.areaID)
         if not mapID or not (CanPlaceNativePin(mapID) or MapCanvas() or CanLoadMap()) then return end
         local key = ("%d:%s:%s"):format(mapID, location.x, location.y)
-        if seen[key] then return end
-        seen[key] = true
+        if seenPinKeys[key] then return end
+        seenPinKeys[key] = true
         pins[#pins + 1] = {
             mapID = mapID, x = location.x / 100, y = location.y / 100, name = name,
             label = ("%s (%.1f, %.1f)"):format(location.name, location.x, location.y),

@@ -1,3 +1,7 @@
+## Quick Item Search 0.4.17
+
+- Clarify the name of the lookup table used to skip duplicate map pins.
+
 ## Quick Item Search 0.4.16
 
 - Rename the emote alias loop counter to make its role in reading numbered WoW commands clearer.
