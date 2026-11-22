@@ -36,17 +36,17 @@ local function UnlockRows(catalog, level)
 end
 
 local function ClassRows(token, className, catalog)
-    local rows, byID = {}, {}
+    local rows, includedSpellIDs = {}, {}
     for _, row in ipairs(UnlockRows(catalog or {})) do
-        rows[#rows + 1], byID[row.id] = row, true
+        rows[#rows + 1], includedSpellIDs[row.id] = row, true
     end
     for _, id in ipairs((addon.classSpells or {})[token] or {}) do
-        if not byID[id] then
+        if not includedSpellIDs[id] then
             local name = addon.playerSpells[id] or ("Spell %d"):format(id)
             local rank = C_Spell and C_Spell.GetSpellSubtext and C_Spell.GetSpellSubtext(id)
             if rank and rank ~= "" then name = name .. " (" .. rank .. ")" end
             rows[#rows + 1] = { id = id, name = name, kind = "spell", matchLabel = className }
-            byID[id] = true
+            includedSpellIDs[id] = true
         end
     end
     table.sort(rows, function(a, b)
