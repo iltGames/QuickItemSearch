@@ -368,8 +368,8 @@ end
 
 local function ReadAmount(values, stat)
     for i = 3, #stat do
-        local key = "ITEM_MOD_" .. stat[i]
-        local amount = values[key .. "_SHORT"] or values[key] or values[_G[key .. "_SHORT"]]
+        local modifierKey = "ITEM_MOD_" .. stat[i]
+        local amount = values[modifierKey .. "_SHORT"] or values[modifierKey] or values[_G[modifierKey .. "_SHORT"]]
         if type(amount) == "number" and not (issecretvalue and issecretvalue(amount)) and amount > 0 then
             return amount
         end

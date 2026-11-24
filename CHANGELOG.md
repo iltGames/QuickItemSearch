@@ -1,3 +1,7 @@
+## Quick Item Search 0.4.20
+
+- Name the item modifier key explicitly in the gear stat lookup.
+
 ## Quick Item Search 0.4.19
 
 - Clarify the name of the lookup table that tracks which spells are already included in class spell results.
