@@ -1,3 +1,7 @@
+## Quick Item Search 0.4.22
+
+- Clarify the name of the table used to skip repeated coordinate labels within a zone.
+
 ## Quick Item Search 0.4.21
 
 - Clarify the variable that holds the lowercase name used to rank gathering search matches.

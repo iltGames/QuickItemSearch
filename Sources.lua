@@ -544,20 +544,20 @@ function addon.GetEntityLocations(entity, id, allowRawSpawns)
     local areas, spawns = GetEntityAreas(entity, id, allowRawSpawns)
     local rows = {}
     for _, area in ipairs(areas) do
-        local seen = {}
+        local seenCoordinateLabels = {}
         for _, point in ipairs(spawns[area.id] or {}) do
             local x, y = point[1], point[2]
             if type(x) == "number" and type(y) == "number" and x >= 0 and x <= 100 and y >= 0 and y <= 100 then
                 local label = ("%.1f, %.1f"):format(x, y)
-                if not seen[label] then
+                if not seenCoordinateLabels[label] then
                     rows[#rows + 1] = {
                         kind = "text", name = area.name, matchLabel = label, areaID = area.id, x = x, y = y,
                     }
-                    seen[label] = true
+                    seenCoordinateLabels[label] = true
                 end
             end
         end
-        if not next(seen) then rows[#rows + 1] = { kind = "text", name = area.name, areaID = area.id } end
+        if not next(seenCoordinateLabels) then rows[#rows + 1] = { kind = "text", name = area.name, areaID = area.id } end
     end
     return rows
 end
