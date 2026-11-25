@@ -1,3 +1,7 @@
+## Quick Item Search 0.4.24
+
+- Clarify the name of the cache for equipped item levels by inventory slot.
+
 ## Quick Item Search 0.4.23
 
 - Clarify the dungeon matching parameter that holds the normalized search query.

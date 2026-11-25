@@ -119,13 +119,13 @@ local function ReadItemLevel(getItemLevel, item)
 end
 
 local function EquippedItemLevels(getItemLevel)
-    local levels, equipped = {}, {}
+    local levels, levelBySlot = {}, {}
     local function ReadSlot(slot)
-        if equipped[slot] == nil then
+        if levelBySlot[slot] == nil then
             local link = GetInventoryItemLink("player", slot)
-            equipped[slot] = link and ReadItemLevel(getItemLevel, link) or false
+            levelBySlot[slot] = link and ReadItemLevel(getItemLevel, link) or false
         end
-        return equipped[slot]
+        return levelBySlot[slot]
     end
     local offHand = GetInventoryItemLink("player", 17)
     local offHandType = offHand and C_Item and C_Item.GetItemInfoInstant
