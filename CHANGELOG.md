@@ -1,3 +1,7 @@
+## Quick Item Search 0.4.21
+
+- Clarify the variable that holds the lowercase name used to rank gathering search matches.
+
 ## Quick Item Search 0.4.20
 
 - Name the item modifier key explicitly in the gear stat lookup.

@@ -47,10 +47,10 @@ end
 
 local function NameRank(name, target)
     if not name then return 0 end
-    local key = name:lower()
-    if key == target then return 3 end
+    local lowerName = name:lower()
+    if lowerName == target then return 3 end
     if #target < 2 then return 0 end
-    local start = key:find(target, 1, true)
+    local start = lowerName:find(target, 1, true)
     if start == 1 then return 2 end
     return start and 1 or 0
 end
