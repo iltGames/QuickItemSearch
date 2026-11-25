@@ -1,3 +1,7 @@
+## Quick Item Search 0.4.23
+
+- Clarify the dungeon matching parameter that holds the normalized search query.
+
 ## Quick Item Search 0.4.22
 
 - Clarify the name of the table used to skip repeated coordinate labels within a zone.

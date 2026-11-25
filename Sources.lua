@@ -264,12 +264,12 @@ local function InstanceCatalog()
     return instances, journal
 end
 
-local function MatchInstances(instances, key)
-    if instances[key] then return { instances[key] } end
-    local direMaulAlias = key == "dm"
+local function MatchInstances(instances, queryKey)
+    if instances[queryKey] then return { instances[queryKey] } end
+    local direMaulAlias = queryKey == "dm"
     local matches = {}
     for instanceKey, instance in pairs(instances) do
-        if (not direMaulAlias and instanceKey:find(key, 1, true)) or (direMaulAlias
+        if (not direMaulAlias and instanceKey:find(queryKey, 1, true)) or (direMaulAlias
             and (instanceKey:find("deadmines", 1, true) or instanceKey:find("diremaul", 1, true))) then
             matches[#matches + 1] = instance
         end
