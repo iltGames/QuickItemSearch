@@ -40,7 +40,7 @@ local function NPCDetails(npcs, id, name)
     local showVendors = addon.IsAutomaticSectionEnabled("Vendor Items")
     if not showLoot and not showVendors then return locations, title end
 
-    local function Results(loot, sold, hint, load)
+    local function BuildDetailResults(loot, sold, hint, load)
         if #loot == 0 and #sold == 0 then return locations, hint, load end
         local sections = {}
         if #locations > 0 then sections[#sections + 1] = { title = "Locations", rows = locations } end
@@ -52,11 +52,11 @@ local function NPCDetails(npcs, id, name)
     end
 
     local loot, sold, load = addon.FindNPCItems(id, name, showLoot, showVendors)
-    if not load then return Results(loot, sold, title) end
+    if not load then return BuildDetailResults(loot, sold, title) end
     local checking = showLoot and (showVendors and "Checking for loot and vendor items…" or "Checking for loot…")
         or "Checking for vendor items…"
-    return Results(loot, sold, title .. "\n" .. checking, function(done)
-        return load(function(drops, vendors) done(Results(drops, vendors, title)) end)
+    return BuildDetailResults(loot, sold, title .. "\n" .. checking, function(done)
+        return load(function(drops, vendors) done(BuildDetailResults(drops, vendors, title)) end)
     end)
 end
 

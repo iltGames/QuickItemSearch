@@ -1,3 +1,7 @@
+## Quick Item Search 0.4.25
+
+- Clarify the name of the helper that builds NPC location, loot, and vendor results.
+
 ## Quick Item Search 0.4.24
 
 - Clarify the name of the cache for equipped item levels by inventory slot.
